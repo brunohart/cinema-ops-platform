@@ -1,0 +1,322 @@
+# DECISIONS — cinema-ops-platform
+
+**Status:** living record. One ADR per real choice, written at the moment the choice was made.
+**Started:** 2026-07-30
+**Last revised:** 2026-07-30
+**Companion to:** `ARCHITECTURE.md` — that file states what the system is, this one states why it is
+that and not something else.
+
+---
+
+## How I use this file
+
+An ADR — architecture decision record — is a short, dated note capturing a choice while the
+reasoning is still intact. Not documentation of what the system does; documentation of the fork in
+the road and why I took the branch I took.
+
+I only write one where the choice was a **one-way door** — expensive or disruptive to reverse later.
+Choices I can undo in an afternoon aren't decisions, they're settings, and recording them dilutes the
+record until nothing in it reads as significant. Ten entries where each one cost something to make is
+worth more than forty where most were defaults.
+
+Every entry ends with the condition under which I would reverse it. That field is the one doing the
+real work, and it is the reason this file is not a list of preferences. A choice I cannot describe
+the failure of is a choice I did not make — I inherited it from a tutorial, or from whichever tool I
+happened to already know. Stating the reversal condition is how I prove to myself that I compared
+something.
+
+The scope discipline running through all of these: **this is a seven-day artefact built to be
+operated properly and defended completely, not a demonstration of surface area.** Every entry below
+optimises for something I can run, break, observe and explain — over something with a more
+impressive name on it. Where that trade cost me something, I've written down what it cost.
+
+**Status values:** `Accepted` · `Superseded by ADR-NNN` · `Reversed` — with the reason, in place.
+Nothing here gets deleted; a decision I reversed is more informative than one I never examined.
+
+---
+
+## ADR-001 — Dagster over Airflow
+
+**Status** Accepted · 2026-07-30
+
+**Context** This platform's hard problems are not scheduling problems. They are lineage, freshness
+and data-quality problems: four sources with four failure modes, three layers, and a set of SLAs in
+`ARCHITECTURE.md` section 5 that only mean anything if the orchestrator can express them as checks attached
+to the data itself. I need to know *which asset is stale*, not *which task failed*.
+
+**Decision** Dagster, asset-based. Assets are declared as the things that should exist; checks,
+freshness policies and lineage hang off those declarations rather than off a task graph. The dbt
+integration means my dbt models arrive as first-class assets rather than as one opaque `dbt run`
+step, which is what keeps section 5's per-asset promises addressable.
+
+**Consequences** Smaller ecosystem and a smaller hiring pool; Airflow appears in far more job ads,
+and choosing Dagster means I am not demonstrating the more commonly listed tool. I accept that
+because I would rather be able to answer *why* than claim familiarity with the more popular option.
+It is also a heavier local footprint than a bare scheduler, and the asset model requires thinking in
+declarations before writing any orchestration code — a real cost on day one that pays back by day
+four.
+
+**What would change my mind** A team already fluent in Airflow — tool consensus beats marginal tool
+fit, and I would not impose a migration on people to win an argument. Or a workload that is genuinely
+task-shaped rather than asset-shaped: fire-and-forget jobs with no durable output to reason about,
+where the asset abstraction is overhead with nothing underneath it. Airflow 3's move toward
+asset-aware scheduling also narrows this gap, and if that convergence continues the argument becomes
+about ecosystem rather than model — at which point Airflow wins it.
+
+---
+
+## ADR-002 — Postgres over DuckDB
+
+**Status** Accepted · 2026-07-30
+
+**Context** I need a store that can hold bronze, silver and gold, take concurrent writes from a
+streaming consumer and a batch loader at the same time, and back a governed service layer that an
+agent queries. The analytical workload here is small; the *access* requirements are not.
+
+**Decision** Postgres, in Docker, one database with schemas per layer.
+
+The load-bearing reason is access control. `ARCHITECTURE.md` section 6 commits to PII being absent from the
+agent's reachable surface rather than filtered out of it, and Postgres can express that structurally
+— `GRANT SELECT (column, column) ON table TO role`, so the role backing the MCP server has no grant
+on `dim_customer`'s personal columns at all. DuckDB is an embedded engine with no user or role model;
+under DuckDB that commitment could only be implemented as application-layer discipline, which is
+precisely the redaction-versus-absence distinction I argued against. The privacy design would have
+become a promise rather than a property. Secondarily, DuckDB's single-writer model conflicts with a
+continuous stream consumer running alongside scheduled batch loads.
+
+**Consequences** Postgres is a row-store built for transactions, not a columnar warehouse. Analytical
+scans will be slower than DuckDB on the same data, and at genuine scale this choice does not hold —
+the honest answer at hundreds of millions of rows is ClickHouse, Snowflake or BigQuery. I am
+optimising for a correct, operable, governable system at the scale I actually have, and I would
+rather defend that than run a warehouse I cannot afford to keep on.
+
+**What would change my mind** A read-only analytical artefact with no concurrent writers and no
+service layer — DuckDB would be faster, simpler and would remove a container from the stack. Or
+scale: once the fact tables outgrow what Postgres serves comfortably, the layering and the dbt models
+port to a columnar engine largely intact, which is part of why the medallion structure in ADR-003 is
+worth its cost.
+
+---
+
+## ADR-003 — Medallion layering: bronze, silver, gold
+
+**Status** Accepted · 2026-07-30
+
+**Context** Four sources arriving in four shapes, needing to end up as one dimensional model. The
+question is whether to transform on the way in — parse, conform and land clean — or to land exactly
+what arrived and transform in defined stages afterwards.
+
+**Decision** Three layers with hard boundaries. Bronze stores the payload unparsed with four
+metadata columns and is never transformed. Silver validates, types and conforms. Gold is the
+dimensional model that anything outside the pipeline is allowed to see.
+
+Bronze exists because **raw data is optionality.** Every parse is an interpretation, and my
+interpretation on day one will be wrong somewhere. If I have kept the payload, a wrong reading is a
+re-run; if I parsed on the way in, it is a re-extraction from a source that may have rate-limited me,
+rotated its data, or simply moved on. The layering also gives failures a place to be isolated — a
+schema drift caught at the bronze-to-silver boundary has not touched gold — and it gives
+classification a natural surface, since the boundaries are exactly where section 6's rules get enforced.
+
+**Consequences** The same data is stored three times, and three sets of models exist where one would
+do. Every hop adds latency to the freshness budget in section 5a. For four sources this is proportionate;
+for one clean source it would be ceremony, and I want to be able to say that out loud rather than
+defend the pattern as universally correct.
+
+**What would change my mind** A single source with a stable, contracted schema and no re-derivation
+risk. There, bronze buys nothing but storage cost and a hop of latency, and one staging layer into a
+model is the honest architecture. The pattern earns its keep in proportion to how little I control
+the inputs — which in this build is: not at all.
+
+---
+
+## ADR-004 — dbt Core for transformation
+
+**Status** Accepted · 2026-07-30
+
+**Context** Silver and gold are SQL transformations with dependencies between them, and they need
+tests, lineage and documentation attached rather than adjacent. The alternative is hand-rolled SQL
+executed by Python, which starts simpler and accretes an inferior version of dbt over about two
+weeks.
+
+**Decision** dbt Core, local, no dbt Cloud. Models for silver and gold, dbt tests carrying the section 5c
+correctness invariants, exposed to Dagster through `dagster-dbt` so each model is an asset rather
+than a step inside one.
+
+**Consequences** Another tool in the stack and a real learning curve — Jinja-templated SQL is harder
+to debug than SQL, and compiled output is a layer between what I wrote and what ran. It also biases
+me toward solving problems in SQL because that is what the tool is shaped for, which is a bias I want
+to name rather than pretend I am immune to.
+
+**What would change my mind** Transformation work that isn't set-shaped — feature engineering,
+sequence processing, anything where the logic wants to be a function over rows rather than a query
+over a table. Forcing that into SQL to keep the tool consistent would be tool loyalty rather than
+judgement.
+
+---
+
+## ADR-005 — Validate at the ingest boundary with Pydantic
+
+**Status** Accepted · 2026-07-30
+
+**Context** `ARCHITECTURE.md` section 2 commits to schema drift being detected rather than absorbed. The
+choice is where to detect it: at the door with an explicit contract, or downstream with tests that
+notice the consequences.
+
+**Decision** A Pydantic model per source, validated at ingest. A file is accepted whole or rejected
+whole; rejected records are counted and quarantined rather than dropped, so a rejection is visible
+and recoverable instead of being a silent subtraction.
+
+Detecting drift downstream means the bad data is already inside the system and the symptom is
+distant from the cause. Detecting it at the boundary means the error names the source and the field,
+which is the difference between a twenty-minute fix and an afternoon of bisecting a wrong aggregate.
+
+**Consequences** A hand-written contract per source that has to be maintained in step with reality,
+and a maintainer's temptation to loosen a model to make an alert stop rather than to investigate why
+it fired. Whole-file rejection is also deliberately blunt: one malformed row rejects the batch, which
+is the correct default for financial-adjacent data and would be wrong for high-volume telemetry.
+
+**What would change my mind** A producer publishing a formal schema — Avro or protobuf against a
+registry. Then the contract has a single authoritative definition and my hand-written mirror of it is
+duplicated truth waiting to drift, and the right move is to generate from the registry instead.
+
+---
+
+## ADR-006 — Watermark plus overlap window, not CDC
+
+**Status** Accepted · 2026-07-30
+
+**Context** `cinema_ops` is an operational Postgres database I read and do not own. Change data
+capture would give exact ordering, every intermediate state and hard deletes — strictly more
+information than incremental reads.
+
+**Decision** Incremental reads on a high watermark with a deliberate overlap window, deduplicated
+idempotently on the natural key. The overlap exists because a transaction's business timestamp can
+precede its commit time, so a read that starts exactly where the last one stopped steps past
+late-committing rows permanently.
+
+CDC is rejected on operational grounds rather than technical ones. It requires a replication slot on
+someone else's production database, which is a conversation with an owner and a risk they carry, not
+a configuration change I can make. An unconsumed replication slot also prevents WAL cleanup on the
+source — meaning my pipeline stalling silently becomes their disk filling up. I am not willing to
+put a failure of mine into a production system I do not operate.
+
+**Consequences** No hard-delete detection, no intermediate states, and the overlap window is
+currently a guess (`ARCHITECTURE.md` section 8, Q3). Too narrow loses data; too wide costs source reads
+every run. It is a number I am carrying as an estimate and intend to replace with a measurement.
+
+**What would change my mind** Owning the source database, or a business requirement that turns on
+deletions — refund reversals, GDPR erasure propagation, anything where a row's disappearance is
+itself the event. At that point watermarking cannot express the requirement at all and CDC is not an
+optimisation but a necessity.
+
+---
+
+## ADR-007 — Redpanda over Kafka
+
+**Status** Accepted · 2026-07-30
+
+**Context** I need one event source in the build to exercise streaming failure modes — duplicate
+delivery, consumer lag, partition stalls — inside a Docker Compose stack that has to start reliably
+on a laptop alongside Postgres, Dagster and dbt.
+
+**Decision** Redpanda. Kafka-API compatible, single binary, no JVM and no separate coordination
+service, so the compose file stays comprehensible and the stack starts in seconds rather than
+minutes.
+
+**Consequences** Less ubiquitous than Kafka, and a reviewer scanning for the word "Kafka" will not
+find it. I judge that acceptable specifically because the API is the same — the consumer code, the
+offset handling and the idempotency logic are all identical, so what I learned transfers whole.
+
+**What would change my mind** A target environment already running Kafka or MSK. Though this is the
+most reversible entry in the file: the client code does not change, which is the entire reason the
+choice was cheap to make and is worth recording as such.
+
+---
+
+## ADR-008 — Idempotent merge instead of pursuing exactly-once
+
+**Status** Accepted · 2026-07-30
+
+**Context** The ticketing stream delivers at-least-once, so duplicates are not an anomaly but a
+guarantee of the transport. Batch runs also repeat — on retry, on backfill, and on the manual re-run
+at 11pm when I am not certain the earlier one completed.
+
+**Decision** Every write path merges on a natural or event key. Re-processing the same record
+produces the identical result, so repetition is a no-op rather than a duplication. I am not building
+machinery to guarantee single execution.
+
+Attempting exactly-once means building locks, run registries and coordination — each of which has
+gaps, and each of which becomes a component that can itself fail and needs its own recovery story.
+Making repetition harmless removes the requirement instead of defending it. The payoff is
+disproportionate: re-running becomes a universally safe recovery action, so an entire class of
+incident collapses into "run it again."
+
+**Consequences** Every record needs a stable identifier, which pushes a requirement back onto the
+data model and rules out sources that cannot provide one. Merge is also more expensive per row than
+append, and correctness now depends on key selection being right — a subtly wrong key produces
+either duplicates or silent overwrites, which is why section 5c invariant C3 tests it directly rather than
+trusting it.
+
+**What would change my mind** An append-only audit log where every physical delivery is itself the
+record of interest and deduplication would destroy the evidence. There, at-least-once with duplicates
+preserved is the correct behaviour, not a defect to be merged away.
+
+---
+
+## ADR-009 — The agent interface is a fixed tool set over gold, not a SQL endpoint
+
+**Status** Accepted · 2026-07-30
+
+**Context** The MCP server exposes this platform to an AI agent. The tempting design is one flexible
+tool that accepts a query and runs it, because it answers every question I have not thought of yet.
+
+**Decision** A small set of named, parameterised, read-only tools over gold. No arbitrary SQL, no
+write path, and a database role whose grants exclude PII columns outright.
+
+A query-execution tool is an unbounded interface: its capability is whatever SQL can express against
+what the role can reach, which is not a surface I can reason about, test, or write assertions for. A
+fixed tool set is bounded, and a bounded surface is the only kind that can be red-teamed
+meaningfully — which is the difference between the Day 5 eval suite producing a result and producing
+a vibe. It also matters more here than for a human interface, because an agent's instructions can be
+rewritten by text it encountered elsewhere, so the boundary cannot live in the prompt. It has to live
+in what the tool is physically able to return.
+
+**Consequences** Every new question needs a new tool, and I will be wrong about which ones matter. It
+is materially less useful on day one than an open endpoint, and that gap is the price of the
+interface being defensible.
+
+**What would change my mind** A consumer that is a credentialed human analyst inside an audited
+session rather than an agent. Judgement, accountability and an audit trail are exactly what an agent
+lacks, and their presence changes the calculation — flexible query access to a person who can be
+asked why is a different risk from the same access granted to a process that can be steered by a
+sentence someone hid in a document.
+
+---
+
+## ADR-010 — Local Docker Compose, not managed cloud
+
+**Status** Accepted · 2026-07-30
+
+**Context** Forty hours, and an artefact whose value is that a reviewer can inspect and run it. The
+alternative is a managed warehouse and a cloud orchestrator, which is closer to how this would be
+run in production.
+
+**Decision** Everything local and reproducible: `docker compose up`, one command, a complete stack.
+Deployment is the first item I cut if the week runs short.
+
+This is the same instinct as the explicit non-scope in the build plan — no Spark, no Kubernetes, no
+Snowflake. A system I can operate properly, break deliberately, observe under failure and explain
+completely is worth more than a broader stack I can only narrate. *"I scoped to what I could operate
+properly rather than what I could name-drop"* is the position I want to be able to hold under
+questioning, and it is only true if I actually held to it.
+
+**Consequences** No demonstration of cloud infrastructure, IaC or managed-service operations, and
+that is a genuine gap in what the artefact shows. I would rather have a visible, stated gap than a
+half-configured cloud deployment I cannot explain the cost model of.
+
+**What would change my mind** A requirement that the artefact demonstrate infrastructure competence
+specifically, or a reviewer who will run it rather than read it and needs a URL rather than a repo.
+If deployment survives the week, this becomes a supplement to the local stack rather than a
+replacement for it — the compose file stays the reference environment either way.
+
+---
