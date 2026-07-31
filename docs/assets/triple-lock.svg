@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 430" width="1200" height="430" role="img" aria-label="The triple lock: a PII value cannot reach an agent because the query never selects it, the response type has no field for it, and the database role holds no grant on it.">
+  <rect width="1200" height="430" fill="#0C0F13"/>
+  <rect width="1200" height="430" fill="none" stroke="#1D232B" stroke-width="2"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="48" y="52" fill="#7C8794" font-size="13" letter-spacing="3.5">ABSENCE, NOT REDACTION</text>
+    <text x="48" y="86" fill="#EEF1F4" font-size="24">Three layers saying the same thing, so that no single mistake is sufficient</text>
+  </g>
+
+  <g stroke="#39424E" stroke-width="1.6" fill="none" marker-end="url(#arrow)">
+    <path d="M224 190 h40"/>
+    <path d="M464 190 h32"/>
+    <path d="M688 190 h32"/>
+    <path d="M912 190 h40"/>
+  </g>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#39424E"/>
+    </marker>
+  </defs>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="48" y="140" width="176" height="100" rx="8" fill="#1A1216" stroke="#A65B63" stroke-width="1.5"/>
+    <text x="68" y="174" fill="#D98F96" font-size="14">customer_email</text>
+    <text x="68" y="198" fill="#8B95A1" font-size="12">class: PII</text>
+    <text x="68" y="220" fill="#8B95A1" font-size="12">owner: ticketing</text>
+  </g>
+
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="272" y="120" width="192" height="140" rx="8" fill="#12171D" stroke="#4A5563" stroke-width="1.5"/>
+    <text x="292" y="150" fill="#5E6975" font-size="12">01</text>
+    <text x="292" y="176" fill="#E0E5EA" font-size="15">the query</text>
+    <text x="292" y="204" fill="#8B95A1" font-size="12">never selects it</text>
+    <text x="292" y="226" fill="#5E6975" font-size="11">SELECT list is fixed</text>
+
+    <rect x="496" y="120" width="192" height="140" rx="8" fill="#12171D" stroke="#4A5563" stroke-width="1.5"/>
+    <text x="516" y="150" fill="#5E6975" font-size="12">02</text>
+    <text x="516" y="176" fill="#E0E5EA" font-size="15">the response type</text>
+    <text x="516" y="204" fill="#8B95A1" font-size="12">has no field for it</text>
+    <text x="516" y="226" fill="#5E6975" font-size="11">nowhere to put the value</text>
+
+    <rect x="720" y="120" width="192" height="140" rx="8" fill="#12171D" stroke="#4A5563" stroke-width="1.5"/>
+    <text x="740" y="150" fill="#5E6975" font-size="12">03</text>
+    <text x="740" y="176" fill="#E0E5EA" font-size="15">the grant</text>
+    <text x="740" y="204" fill="#8B95A1" font-size="12">role holds none</text>
+    <text x="740" y="226" fill="#5E6975" font-size="11">GRANT SELECT (col, col)</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="952" y="140" width="200" height="100" rx="8" fill="#101A14" stroke="#4E8C63" stroke-width="1.5"/>
+    <text x="972" y="174" fill="#7FC59A" font-size="14">agent tool output</text>
+    <text x="972" y="198" fill="#8B95A1" font-size="12">contains no such field</text>
+    <text x="972" y="220" fill="#5E6975" font-size="11">structure, not behaviour</text>
+  </g>
+
+  <line x1="48" y1="300" x2="1152" y2="300" stroke="#1D232B" stroke-width="1.5"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <rect x="48" y="326" width="1104" height="66" rx="8" fill="#14110C" stroke="#8A6A34" stroke-width="1.4"/>
+    <text x="72" y="354" fill="#E0B24C" font-size="14">and one class above all three &#8212; excluded</text>
+    <text x="72" y="378" fill="#9AA5B1" font-size="12.5">payment_card_number is dropped at the extractor, before bronze. There is no copy anywhere in the platform to govern, encrypt or leak.</text>
+  </g>
+</svg>
