@@ -7,81 +7,23 @@
  *
  * Cross-check against ARCHITECTURE §6b classification table:
  *   PII on dim_customer → customer_email, customer_name, loyalty_number,
- *   marketing_consent — none of those names exist in this module.
+ *   marketing_consent — none of those names exist in AGENT_OUTPUT_SCHEMAS.
  *   pseudonym (customer_key) is also agent-excluded (§6a).
  *   seat_label is never returned alongside a person key (§6d).
+ *
+ * Keys match `QUERIES` in queries.ts (VDE-39 allowlist).
  */
 
-/** One scheduled screening's aggregate outcome — commercial measures only. */
-export type ShowtimePerformanceRow = {
-  showtime_key: string;
-  cinema_id: string;
-  screen_id: string;
-  show_date: string; // ISO date
-  seats_sold: number;
-  seats_capacity: number;
-  occupancy_rate: number;
-  gross_revenue: number;
+/** site_performance — commercial aggregates only; no person grain. */
+export type SitePerformanceRow = {
+  site_name: string;
+  rev: number;
+  admits: number;
 };
 
-/** Film performance rolled up to a day — no person grain. */
-export type FilmDayPerformanceRow = {
-  film_key: number;
-  film_title: string;
-  date_key: number;
-  ticket_count: number;
-  gross_revenue: number;
-};
-
-/** Booking channel mix — aggregates only, min cohort enforced in SQL. */
-export type ChannelMixRow = {
-  channel: string;
-  booking_count: number;
-  booking_total: number;
-};
-
-/** Public film attributes the agent may surface. */
-export type FilmRow = {
-  film_key: number;
-  film_id: number;
-  title: string;
-  release_date: string | null;
-  runtime_minutes: number | null;
-  is_current: boolean;
-};
-
-/** Declared output schemas keyed by tool name — the checklist surface. */
+/** Declared output schemas keyed by allowlisted query name. */
 export const AGENT_OUTPUT_SCHEMAS = {
-  get_showtime_performance: [
-    "showtime_key",
-    "cinema_id",
-    "screen_id",
-    "show_date",
-    "seats_sold",
-    "seats_capacity",
-    "occupancy_rate",
-    "gross_revenue",
-  ],
-  get_film_day_performance: [
-    "film_key",
-    "film_title",
-    "date_key",
-    "ticket_count",
-    "gross_revenue",
-  ],
-  get_channel_mix: [
-    "channel",
-    "booking_count",
-    "booking_total",
-  ],
-  list_films: [
-    "film_key",
-    "film_id",
-    "title",
-    "release_date",
-    "runtime_minutes",
-    "is_current",
-  ],
+  site_performance: ["site_name", "rev", "admits"],
 } as const;
 
 /** Every classification-table PII / agent-excluded field — must not appear above. */

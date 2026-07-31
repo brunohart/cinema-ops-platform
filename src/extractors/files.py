@@ -7,17 +7,17 @@ quarantined with a ``schema_drift`` reason rather than silently dropped.
 from __future__ import annotations
 
 import csv
-import logging
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from extractors.base import BaseExtractor
+from logging_config import get_logger
 from models.session import SessionRow
 from validation.pydantic_validator import PydanticPayloadValidator, schema_drift_reason
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SOURCE_NAME = "landing_files"
 
@@ -37,6 +37,7 @@ class FileExtractor(BaseExtractor):
         self.model = model or SessionRow
         self.pattern = pattern
         kwargs.setdefault("source", SOURCE_NAME)
+        kwargs.setdefault("asset_key", "bronze/raw_landing_files")
         kwargs.setdefault("validator", PydanticPayloadValidator(self.model))
         super().__init__(**kwargs)
 
@@ -44,7 +45,7 @@ class FileExtractor(BaseExtractor):
         """Read unprocessed CSVs since ``watermark`` (a list of absolute paths)."""
         processed = set(watermark or [])
         if not self.landing_dir.exists():
-            logger.warning("landing dir does not exist: %s", self.landing_dir)
+            logger.warning("landing.missing_dir", path=str(self.landing_dir))
             return [], sorted(processed)
 
         rows: list[dict[str, Any]] = []

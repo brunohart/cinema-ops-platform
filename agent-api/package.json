@@ -1,15 +1,30 @@
 {
-  "name": "@cinema-ops/agent-api",
+  "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Bounded, read-only agent tool queries over gold — PII absent, not redacted",
+  "description": "Bounded, allowlisted agent read path — PII absent from every output shape (VDE-39 / VDE-42 / ADR-009)",
   "type": "module",
-  "main": "src/queries.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    "./queries": "./src/queries.ts",
+    ".": "./dist/index.js",
+    "./queries": "./dist/queries.js",
     "./schemas": "./src/schemas.ts"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prove": "bash ../scripts/prove_allowlisted_queries.sh",
     "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
   }
 }

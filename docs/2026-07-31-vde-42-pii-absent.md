@@ -22,13 +22,17 @@ Three layers say the same thing (ARCHITECTURE §6c):
 
 | layer | artefact | what it enforces |
 |-------|----------|------------------|
-| 1 — query | `agent-api/src/queries.ts` | no code path selects a PII column |
+| 1 — query | `agent-api/src/queries.ts` (`QUERIES`, VDE-39 allowlist) | no code path selects a PII column |
 | 2 — shape | `agent-api/src/schemas.ts` | response type has no field to put one in |
 | 3 — grant | `sql/init/005_agent_role.sql` | role backing the tools cannot `SELECT` them |
 
-Storage still holds them: `sql/gold/003_dim_customer.sql` seeds real-shaped personal
-columns so the interface proof is meaningful. Absence is only interesting if the column
-exists somewhere.
+VDE-39 landed the allowlist shape first. This issue does not replace that surface —
+it constrains it: every SQL string and every declared output field is checked against
+the classification table.
+
+Storage still holds personal columns: `sql/gold/003_dim_customer.sql` seeds them so
+the interface proof is meaningful. Absence is only interesting if the column exists
+somewhere.
 
 ## Classification checklist
 
