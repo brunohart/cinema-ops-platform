@@ -7,6 +7,10 @@ Proofs:
 
     python -m src.cli extract tmdb
     psql $DB -c "select count(*) from bronze.film_raw"
+
+    python -m src.cli produce events
+    python -m src.cli consume events
+    psql $DB -c "select count(*) from bronze.events_raw"
 """
 
 from __future__ import annotations
@@ -22,6 +26,13 @@ _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from extractors.events import (  # noqa: E402
+    DEFAULT_BOOTSTRAP,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TOPIC,
+    consume_events,
+    produce_events,
+)
 from extractors.files import FileExtractor  # noqa: E402
 from stores.postgres import (  # noqa: E402
     DsnQuarantineStore,
@@ -61,6 +72,29 @@ def _bootstrap_landing_schema(dsn: str) -> None:
         str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
         str(root / "sql" / "001_bronze.sql"),
     )
+
+
+def _bootstrap_events_schema(dsn: str) -> None:
+    """Apply quarantine + events_raw DDL (idempotent)."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "bronze" / "003_events_raw.sql"),
+    )
+
+
+def _kafka_bootstrap() -> str:
+    return os.environ.get("KAFKA_BOOTSTRAP") or DEFAULT_BOOTSTRAP
+
+
+def _kafka_topic() -> str:
+    return os.environ.get("KAFKA_TOPIC") or DEFAULT_TOPIC
+
+
+def _kafka_group() -> str:
+    return os.environ.get("KAFKA_GROUP_ID") or DEFAULT_GROUP_ID
 
 
 def cmd_extract_files(args: argparse.Namespace) -> int:
@@ -117,6 +151,54 @@ def cmd_extract_tmdb(_args: argparse.Namespace) -> int:
     return 2
 
 
+def cmd_produce_events(args: argparse.Namespace) -> int:
+    """Emit synthetic booking events to Redpanda (VDE-18)."""
+    _load_dotenv()
+    bootstrap = args.bootstrap or _kafka_bootstrap()
+    topic = args.topic or _kafka_topic()
+    result = produce_events(
+        count=args.count,
+        bootstrap=bootstrap,
+        topic=topic,
+        seed=args.seed,
+        malformed_rate=args.malformed_rate,
+        late_rate=args.late_rate,
+        start_seq=args.start_seq,
+    )
+    print(
+        f"produced={result.produced} malformed={result.malformed} "
+        f"topic={result.topic} bootstrap={bootstrap}"
+    )
+    return 0
+
+
+def cmd_consume_events(args: argparse.Namespace) -> int:
+    """Consume ticketing.bookings with manual offset commits into bronze.events_raw."""
+    _load_dotenv()
+    dsn = dsn_from_env()
+    if not args.skip_schema:
+        _bootstrap_events_schema(dsn)
+
+    bootstrap = args.bootstrap or _kafka_bootstrap()
+    topic = args.topic or _kafka_topic()
+    group_id = args.group or _kafka_group()
+
+    result = consume_events(
+        dsn=dsn,
+        bootstrap=bootstrap,
+        topic=topic,
+        group_id=group_id,
+        max_messages=args.max_messages,
+        idle_timeout_seconds=args.idle_timeout,
+    )
+    print(
+        f"source=ticketing fetched={result.fetched} merged={result.merged} "
+        f"quarantined={result.quarantined} committed={result.committed} "
+        f"batch_id={result.batch_id}"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="src.cli", description="cinema-ops-platform CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -139,6 +221,72 @@ def build_parser() -> argparse.ArgumentParser:
 
     tmdb = extract_sub.add_parser("tmdb", help="Pull TMDB film metadata into bronze")
     tmdb.set_defaults(func=cmd_extract_tmdb)
+
+    produce = sub.add_parser("produce", help="Emit synthetic source data")
+    produce_sub = produce.add_subparsers(dest="source", required=True)
+    produce_events_p = produce_sub.add_parser(
+        "events",
+        help="Synthetic ticketing booking events → Redpanda",
+    )
+    produce_events_p.add_argument("--count", type=int, default=20, help="Events to emit")
+    produce_events_p.add_argument(
+        "--seed", type=int, default=18, help="Deterministic event_id seed"
+    )
+    produce_events_p.add_argument(
+        "--start-seq", type=int, default=1, help="First sequence number"
+    )
+    produce_events_p.add_argument(
+        "--malformed-rate",
+        type=float,
+        default=0.05,
+        help="Fraction of deliberately broken JSON payloads",
+    )
+    produce_events_p.add_argument(
+        "--late-rate",
+        type=float,
+        default=0.25,
+        help="Fraction with event_time a few minutes in the past",
+    )
+    produce_events_p.add_argument(
+        "--bootstrap", default=None, help="Kafka bootstrap servers"
+    )
+    produce_events_p.add_argument(
+        "--topic", default=None, help="Topic (default ticketing.bookings)"
+    )
+    produce_events_p.set_defaults(func=cmd_produce_events)
+
+    consume = sub.add_parser("consume", help="Consume a stream into bronze")
+    consume_sub = consume.add_subparsers(dest="source", required=True)
+    consume_events_p = consume_sub.add_parser(
+        "events",
+        help="ticketing.bookings → bronze.events_raw (manual offset commit)",
+    )
+    consume_events_p.add_argument(
+        "--bootstrap", default=None, help="Kafka bootstrap servers"
+    )
+    consume_events_p.add_argument(
+        "--topic", default=None, help="Topic (default ticketing.bookings)"
+    )
+    consume_events_p.add_argument("--group", default=None, help="Consumer group id")
+    consume_events_p.add_argument(
+        "--max-messages",
+        type=int,
+        default=100,
+        help="Max messages to poll in one run",
+    )
+    consume_events_p.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=5.0,
+        help="Stop polling after this many idle seconds",
+    )
+    consume_events_p.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap events_raw DDL before consuming",
+    )
+    consume_events_p.set_defaults(func=cmd_consume_events)
+
     return parser
 
 
