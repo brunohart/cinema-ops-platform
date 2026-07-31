@@ -1,0 +1,24 @@
+{
+  "name": "cinema-ops-agent-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bounded, allowlisted query surface for the agent read path (VDE-39 / ADR-009)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prove": "bash ../scripts/prove_allowlisted_queries.sh"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
