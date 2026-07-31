@@ -18,6 +18,7 @@ services:
       - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/032_raw_cinema_ops.sql:ro
       - ./sql/bronze/003_events_raw.sql:/docker-entrypoint-initdb.d/033_events_raw.sql:ro
       - ./sql/bronze/004_events_raw_grants.sql:/docker-entrypoint-initdb.d/034_events_raw_grants.sql:ro
+      - ./sql/bronze/005_raw_tmdb.sql:/docker-entrypoint-initdb.d/035_raw_tmdb.sql:ro
       - ./sql/bronze/005_film_raw.sql:/docker-entrypoint-initdb.d/035_film_raw.sql:ro
       - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
     healthcheck:
