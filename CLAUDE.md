@@ -14,6 +14,10 @@ does not belong. Prose lives in ARCHITECTURE.md and DECISIONS.md; this file is r
 
 ## Working agreement
 - Plan before writing. Show me the plan; I read it before you touch a file.
+- The plan is made on Opus, the implementation on Sonnet, and a read-only Opus checker confirms the
+ plan was implemented before anything is reported done. Each phase appends its lesson to
+ `docs/agent-ledger/ledger.jsonl` — append-only, like bronze — and reads the ledger before it
+ starts. `python3 scripts/agent_ledger.py digest`; protocol in `.cursor/rules/agent-pipeline.mdc`.
 - One Linear issue per branch. The branch name comes from the issue, not from you.
 - Tests are written after I have read the implementation, not alongside it.
 - Mock all HTTP in tests. No live API calls in CI.
@@ -47,5 +51,14 @@ does not belong. Prose lives in ARCHITECTURE.md and DECISIONS.md; this file is r
 ## Changelog — append only, newest last
 - 2026-07-30 — seeded at Day 0. Layer rules and working agreement lifted from
   ARCHITECTURE.md and DECISIONS.md; the self-governance and proof-of-work sections added so
-  the file is a living artefact that records its own revisions, rather than a preamble that
-  pretends it was always right.
+ the file is a living artefact that records its own revisions, rather than a preamble that
+ pretends it was always right.
+- 2026-07-31 — added the plan/implement/verify rule. The incident: agents building this repository
+ planned and implemented in the same breath, then graded their own work — a checker that knows what
+ it meant reads what it meant, not what is there — and every run began from zero, rediscovering
+ traps the last run had already hit, because nothing carried between runs except code, and code does
+ not record what nearly went wrong. This file is read every turn and said nothing about how work is
+ delivered, so the rule belongs here; the enforcement is in `.cursor/hooks.json`, because a rule
+ that can be skipped under time pressure is a preference. Also the first rule here pointing at
+ machinery rather than stating a constraint: if `agent_ledger.py promote` never moves a lesson into
+ the layer rules above, the ledger is a diary and this line comes out (ADR-013).
