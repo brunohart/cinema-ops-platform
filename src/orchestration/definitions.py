@@ -1,6 +1,11 @@
-"""Dagster Definitions — the code location loaded by ``dagster dev`` (VDE-22 / VDE-31).
+"""Dagster Definitions — the code location loaded by ``dagster dev``
+(VDE-22 / VDE-31 / VDE-33).
 
-No schedules. Asset graph plus gold asset checks (ARCHITECTURE §5c).
+No classic ``ScheduleDefinition``s. Source (bronze) assets carry
+``AutomationCondition.on_cron`` plus ``FreshnessPolicy.time_window`` from
+ARCHITECTURE §5a; Dagster attaches ``default_automation_condition_sensor``
+(stopped until toggled in Automation). Gold assets carry asset checks from
+ARCHITECTURE §5c (row-count Δ WARN, null-rate / RI ERROR).
 """
 
 from __future__ import annotations
