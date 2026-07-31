@@ -1,4 +1,4 @@
-"""Dagster Definitions — the code location loaded by ``dagster dev`` (VDE-22 / VDE-33).
+"""Dagster Definitions — the code location loaded by ``dagster dev`` (VDE-22 / VDE-33 / VDE-35).
 
 No classic ``ScheduleDefinition``s. Source (bronze) assets carry
 ``AutomationCondition.on_cron`` plus ``FreshnessPolicy.time_window`` from
@@ -6,6 +6,8 @@ ARCHITECTURE §5a; Dagster attaches ``default_automation_condition_sensor``
 (stopped until toggled in Automation).
 
 Assets: bronze extractors + dbt silver/gold (ADR-004 / VDE-29).
+Checks state the §5 promises. One Slack webhook sensor is the alert path —
+failures leave the UI (VDE-35).
 """
 
 from __future__ import annotations
@@ -13,7 +15,9 @@ from __future__ import annotations
 from dagster import AssetSelection, Definitions, define_asset_job
 from dagster_dbt import DbtCliResource
 
+from orchestration.alerts import ALL_SENSORS
 from orchestration.assets import ALL_ASSETS, BRONZE_ASSETS
+from orchestration.checks import ALL_CHECKS
 from orchestration.dbt_assets import DBT_PROJECT_DIR, cinema_ops_dbt_assets
 from orchestration.resources import PipelineConfig
 
@@ -39,6 +43,8 @@ cinema_ops_transform_job = define_asset_job(
 
 defs = Definitions(
     assets=[*ALL_ASSETS, cinema_ops_dbt_assets],
+    asset_checks=ALL_CHECKS,
+    sensors=ALL_SENSORS,
     resources={
         "pipeline_config": PipelineConfig(),
         "dbt": DbtCliResource(
