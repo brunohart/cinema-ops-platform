@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "python3 .cursor/hooks/pipeline_hook.py pre-tool",
+        "timeout": 20,
+        "failClosed": false
+      }
+    ],
+    "subagentStart": [
+      {
+        "command": "python3 .cursor/hooks/pipeline_hook.py subagent-start",
+        "timeout": 20,
+        "failClosed": false
+      }
+    ],
+    "subagentStop": [
+      {
+        "command": "python3 .cursor/hooks/pipeline_hook.py subagent-stop",
+        "timeout": 20,
+        "failClosed": false
+      }
+    ],
+    "stop": [
+      {
+        "command": "python3 .cursor/hooks/pipeline_hook.py stop",
+        "timeout": 30,
+        "loop_limit": 5,
+        "failClosed": false
+      }
+    ]
+  }
+}
