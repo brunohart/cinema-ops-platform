@@ -2,7 +2,7 @@
 
 **Status:** living record. One ADR per real choice, written at the moment the choice was made.
 **Started:** 2026-07-30
-**Last revised:** 2026-07-30
+**Last revised:** 2026-07-31
 **Companion to:** `ARCHITECTURE.md` — that file states what the system is, this one states why it is
 that and not something else.
 
@@ -156,15 +156,16 @@ judgement.
 
 ## ADR-005 — Validate at the ingest boundary with Pydantic
 
-**Status** Accepted · 2026-07-30
+**Status** Superseded in part by ADR-011 · 2026-07-30 · partial supersession 2026-07-31
 
 **Context** `ARCHITECTURE.md` section 2 commits to schema drift being detected rather than absorbed. The
 choice is where to detect it: at the door with an explicit contract, or downstream with tests that
 notice the consequences.
 
-**Decision** A Pydantic model per source, validated at ingest. A file is accepted whole or rejected
-whole; rejected records are counted and quarantined rather than dropped, so a rejection is visible
-and recoverable instead of being a silent subtraction.
+**Decision** A Pydantic model per source, validated at ingest. Rejected records are counted and
+quarantined rather than dropped, so a rejection is visible and recoverable instead of being a silent
+subtraction. *(Whole-file / whole-batch rejection was the original blunt default; ADR-011 replaces
+that with row-level quarantine so one bad row cannot block a thousand good ones.)*
 
 Detecting drift downstream means the bad data is already inside the system and the symptom is
 distant from the cause. Detecting it at the boundary means the error names the source and the field,
@@ -172,8 +173,7 @@ which is the difference between a twenty-minute fix and an afternoon of bisectin
 
 **Consequences** A hand-written contract per source that has to be maintained in step with reality,
 and a maintainer's temptation to loosen a model to make an alert stop rather than to investigate why
-it fired. Whole-file rejection is also deliberately blunt: one malformed row rejects the batch, which
-is the correct default for financial-adjacent data and would be wrong for high-volume telemetry.
+it fired.
 
 **What would change my mind** A producer publishing a formal schema — Avro or protobuf against a
 registry. Then the contract has a single authoritative definition and my hand-written mirror of it is
@@ -318,5 +318,35 @@ half-configured cloud deployment I cannot explain the cost model of.
 specifically, or a reviewer who will run it rather than read it and needs a URL rather than a repo.
 If deployment survives the week, this becomes a supplement to the local stack rather than a
 replacement for it — the compose file stays the reference environment either way.
+
+---
+
+## ADR-011 — Quarantine bad rows; do not fail the whole batch
+
+**Status** Accepted · 2026-07-31 · supersedes the whole-batch rejection clause of ADR-005
+
+**Context** ADR-005 chose whole-file rejection so financial-adjacent data would never be partially
+absorbed. In practice that trades one failure mode for another: a single malformed row blocks every
+valid row in the batch, and dropping the bad row to keep the batch moving destroys the only evidence
+of what arrived. Neither option survives a review that asks *"where did the rejected record go?"*
+
+**Decision** Row-level quarantine into `bronze.quarantine`. Good rows land in bronze; bad rows land
+in quarantine with `_batch_id`, `_source`, `_ingested_at`, `reason`, and `raw_payload` — the original
+payload retained as evidence. The batch completes. Completeness for an accepted file is measured
+over rows that passed validation; quarantined rows are counted separately and must not be silent.
+
+`raw_payload` is load-bearing. A quarantine table without the original payload is just a counter of
+our own failures.
+
+**Consequences** Downstream must treat quarantine volume as a first-class signal — otherwise we
+have reinvented silent drop with extra steps. Partial absorption of a file is now intentional: the
+accepted fraction proceeds, the rejected fraction is queryable. Financial or settlement paths that
+genuinely require all-or-nothing acceptance can still refuse to publish gold until quarantine for
+that batch is empty; that gate moves to the gold publication boundary rather than aborting ingest.
+
+**What would change my mind** A source where a single bad row implies the entire file is untrusted
+(torn writes, wrong delimiter, encoding collapse) — there row boundaries themselves are unreliable
+and whole-file rejection is the honest response. Or a regulatory path that forbids partial loads of
+a declared batch under any circumstance.
 
 ---

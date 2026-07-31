@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-07-30
-**Revision count:** 3
+**Last revised:** 2026-07-31
+**Revision count:** 4
 
 ---
 
@@ -68,7 +68,7 @@ rewritten in section 7.
 | # | source | how it fails | why that happens | how I detect it | mitigation | status |
 |---|--------|--------------|------------------|-------------------|------------|--------|
 | 1 | TMDB API | `429` rate limit | request budget is the API owner's, not mine; bursty backfills exceed it | HTTP status check on every response; counter on retry exhaustion | exponential backoff with jitter; alert and halt on give-up rather than proceeding with partial data | `PREDICTED` |
-| 2 | landing files | schema drift | upstream renames, reorders or reformats a column and has no obligation to tell me | Pydantic model validated at ingest; rejected rows counted and quarantined, not dropped | fail loudly at the boundary; a bad file is rejected whole rather than partially absorbed | `PREDICTED` |
+| 2 | landing files | schema drift | upstream renames, reorders or reformats a column and has no obligation to tell me | Pydantic model validated at ingest; rejected rows counted and written to `bronze.quarantine` with `raw_payload` retained | quarantine the bad row, land the good ones; one malformed row must not block the batch (ADR-011) | `PREDICTED` |
 | 3 | `cinema_ops` | late-arriving transactions | a row's business timestamp precedes its commit time; a high-watermark read steps past it permanently | row count in the overlap band per run; reconciliation against source count for a closed period | overlap window on every incremental read + idempotent dedupe on natural key | `PREDICTED` |
 | 4 | ticketing events | duplicate delivery | at-least-once delivery semantics; redelivery on consumer restart or partition replay | duplicate rate on event key, logged per run | idempotent merge on event id — processing the same event *n* times yields the same state as once | `PREDICTED` |
 
@@ -107,6 +107,7 @@ secretly two tables, and every number derived from it will be wrong in a way tha
 | `dim_date` | gold | one calendar date |
 | `stg_*` | silver | one validated record from one source, one-to-one with bronze |
 | `raw_*` | bronze | one payload as received, plus ingestion metadata |
+| `quarantine` | bronze | one rejected ingest row, with reason and the original `raw_payload` retained as evidence |
 
 ### 3b. Bronze contract
 
@@ -219,7 +220,7 @@ The promise: what proportion of the records that should have arrived actually di
 |-------|---------|-------------|-------|
 | `cinema_ops` → bronze | ≥ 99.5% of source row count per batch | reconciliation count against source for the batch window | `est.` — allows for late arrivals inside the overlap window |
 | `cinema_ops` → bronze, closed period | **100%** at T+24 h | same count, re-run once the day is closed | the real promise; 99.5% is a tolerance for *not yet*, not for *lost* |
-| landing files | 100% of rows in an accepted file | rows parsed vs rows in file | a file is accepted whole or rejected whole; no partial absorption |
+| landing files | 100% of valid rows land in bronze; every rejected row is in `bronze.quarantine` | bronze count + quarantine count = rows in file | row-level quarantine (ADR-011); no silent drop, no whole-batch abort on one bad row |
 | `raw_tmdb` | ≥ 99% of requested IDs resolved | resolved / requested per run | 1% allows for genuine 404s on withdrawn titles |
 | `raw_ticketing` | 100% of partitions consumed, zero consumer lag growth | offset lag per partition, trend over run | a stalled partition is silent and loses everything on that partition only |
 
@@ -538,3 +539,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-07-30 | PII absent from agent response shapes, not redacted from them | redaction filter on the tool output | a filter is behaviour that must run correctly every time; a missing field is structure, and structure doesn't have an off day |
 | 2026-07-30 | PII concentrated in `dim_customer`, everything else joins via `customer_key` | personal fields carried where convenient | narrows the blast radius of any modelling mistake to one table; everywhere else a leak is a meaningless integer |
 | 2026-07-30 | `booking_id` on the ticket fact as a degenerate dimension; `booking_total` derived | store the booking total on each ticket row | an identifier isn't summed so it can't fan out; a derived number cannot drift from the rows it sums |
+| 2026-07-31 | quarantine bad rows into `bronze.quarantine` with `raw_payload`; batch continues | drop bad rows, or fail the whole batch | drop destroys evidence; fail-batch lets one bad row block a thousand good ones; quarantine is the only option that survives review (ADR-011 / VDE-14) |
