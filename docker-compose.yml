@@ -1,0 +1,20 @@
+# Local Postgres for bronze / quarantine proof commands.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: cinema
+      POSTGRES_PASSWORD: cinema
+      POSTGRES_DB: cinema_ops
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql/init/001_schemas.sql:/docker-entrypoint-initdb.d/001_schemas.sql:ro
+      - ./sql/bronze/001_quarantine.sql:/docker-entrypoint-initdb.d/010_quarantine.sql:ro
+      - ./sql/bronze/002_quarantine_grants.sql:/docker-entrypoint-initdb.d/011_quarantine_grants.sql:ro
+      - ./sql/001_bronze.sql:/docker-entrypoint-initdb.d/020_landing.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
+      interval: 2s
+      timeout: 5s
+      retries: 20

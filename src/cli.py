@@ -1,6 +1,9 @@
 """CLI entrypoints for cinema-ops-platform extractors.
 
-Proof (VDE-12) once bronze stores and ``$DB`` are wired:
+Proofs:
+
+    python -m src.cli extract files
+    psql $DB -c "select reason, count(*) from bronze.quarantine group by 1"
 
     python -m src.cli extract tmdb
     psql $DB -c "select count(*) from bronze.film_raw"
@@ -11,6 +14,26 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from pathlib import Path
+
+# ``python -m src.cli`` puts the repo root on sys.path; extractor imports live
+# under ``src/`` as top-level packages (same layout VDE-9's pytest pythonpath uses).
+_SRC = Path(__file__).resolve().parent
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
+
+from extractors.files import FileExtractor  # noqa: E402
+from stores.postgres import (  # noqa: E402
+    DsnQuarantineStore,
+    LandingBronzeStore,
+    LandingStateStore,
+    apply_schema_files,
+    dsn_from_env,
+)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
 
 
 def _load_dotenv() -> None:
@@ -29,7 +52,43 @@ def _load_dotenv() -> None:
             os.environ.setdefault(key, value)
 
 
-def cmd_extract_tmdb() -> int:
+def _bootstrap_landing_schema(dsn: str) -> None:
+    """Apply VDE-14 quarantine + VDE-13 landing DDL (idempotent)."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "001_bronze.sql"),
+    )
+
+
+def cmd_extract_files(args: argparse.Namespace) -> int:
+    _load_dotenv()
+    dsn = dsn_from_env()
+    landing = Path(args.landing)
+    if not landing.is_absolute():
+        landing = _repo_root() / landing
+
+    if not args.skip_schema:
+        _bootstrap_landing_schema(dsn)
+
+    extractor = FileExtractor(
+        landing_dir=landing,
+        state_store=LandingStateStore(dsn),
+        bronze_store=LandingBronzeStore(dsn),
+        quarantine_store=DsnQuarantineStore(dsn),
+    )
+    result = extractor.run()
+    print(
+        f"source={extractor.source} fetched={result.fetched} "
+        f"merged={result.merged} quarantined={result.quarantined} "
+        f"batch_id={result.batch_id}"
+    )
+    return 0
+
+
+def cmd_extract_tmdb(_args: argparse.Namespace) -> int:
     """Run the TMDB extractor end-to-end.
 
     Requires ``TMDB_API_KEY`` and a wired bronze/state store (see Day-1 DB issues).
@@ -50,7 +109,6 @@ def cmd_extract_tmdb() -> int:
         )
         return 2
 
-    # Postgres BronzeStore / StateStore land with later Day-1 issues (VDE-11+).
     print(
         "TMDB extractor is implemented (TMDBExtractor.fetch); "
         "Postgres store wiring is not in this change set.",
@@ -59,18 +117,35 @@ def cmd_extract_tmdb() -> int:
     return 2
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="cinema-ops")
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="src.cli", description="cinema-ops-platform CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
     extract = sub.add_parser("extract", help="Run a source extractor into bronze")
-    extract.add_argument("source", choices=["tmdb"], help="Extractor source name")
+    extract_sub = extract.add_subparsers(dest="source", required=True)
 
+    files = extract_sub.add_parser("files", help="Glob landing dir; quarantine schema drift")
+    files.add_argument(
+        "--landing",
+        default="landing",
+        help="Landing directory to glob for *.csv (default: ./landing)",
+    )
+    files.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap quarantine/landing DDL before extracting",
+    )
+    files.set_defaults(func=cmd_extract_files)
+
+    tmdb = extract_sub.add_parser("tmdb", help="Pull TMDB film metadata into bronze")
+    tmdb.set_defaults(func=cmd_extract_tmdb)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
-    if args.command == "extract" and args.source == "tmdb":
-        return cmd_extract_tmdb()
-    parser.error(f"unknown command: {args.command}")
-    return 2
+    return args.func(args)
 
 
 if __name__ == "__main__":
