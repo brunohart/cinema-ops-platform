@@ -32,6 +32,13 @@ from orchestration.resources import PipelineConfig, _repo_root
 # ---------------------------------------------------------------------------
 
 
+def _ensure_json_logging() -> None:
+    """JSON structlog so Dagster materializations carry batch_id context (VDE-34)."""
+    from logging_config import configure_logging
+
+    configure_logging(json_logs=True)
+
+
 def _result_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     meta: dict[str, Any] = {}
     for key, value in payload.items():
@@ -104,6 +111,7 @@ def raw_tmdb(
     from extractors.tmdb import TMDBExtractor
     from stores.postgres import DsnQuarantineStore, LandingBronzeStore, LandingStateStore
 
+    _ensure_json_logging()
     dsn = pipeline_config.dsn()
     if not pipeline_config.skip_schema:
         _bootstrap_files(dsn)
@@ -144,6 +152,7 @@ def raw_landing_files(
     from extractors.files import FileExtractor
     from stores.postgres import DsnQuarantineStore, LandingBronzeStore, LandingStateStore
 
+    _ensure_json_logging()
     dsn = pipeline_config.dsn()
     landing = pipeline_config.resolve_landing_dir()
     if not pipeline_config.skip_schema:
@@ -185,6 +194,7 @@ def raw_cinema_ops(
     from stores.database import TransactionalCinemaOpsStore
     from stores.postgres import DsnQuarantineStore
 
+    _ensure_json_logging()
     dsn = pipeline_config.dsn()
     if not pipeline_config.skip_schema:
         _bootstrap_database(dsn)
@@ -224,6 +234,7 @@ def raw_ticketing(
     """Wrap ``EventExtractor`` / ``consume_events`` — event-stream shape."""
     from extractors.events import DLQ_TOPIC, consume_events
 
+    _ensure_json_logging()
     dsn = pipeline_config.dsn()
     if not pipeline_config.skip_schema:
         _bootstrap_events(dsn)
