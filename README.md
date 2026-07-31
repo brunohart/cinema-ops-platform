@@ -145,21 +145,18 @@ coincidence.
 
 ```mermaid
 flowchart TB
-    subgraph SRC[" four shapes, four failure modes "]
-        direction LR
-        A["TMDB API<br/>JSON over HTTPS, paged<br/><br/>fails on a contract I don't own<br/>429 rate limit"]
-        B["landing files<br/>CSV dropped to a watched dir<br/><br/>fails on a schema nobody promised<br/>column drift"]
-        C["cinema_ops<br/>operational Postgres<br/><br/>fails on time<br/>late-arriving transactions"]
-        D["ticketing events<br/>Redpanda topic<br/><br/>fails on delivery<br/>duplicate delivery"]
-    end
+    A["TMDB API<br/><i>a contract I don't own</i><br/>fails on 429"]
+    B["landing files<br/><i>a schema nobody promised</i><br/>fails on drift"]
+    C["cinema_ops<br/><i>a database</i><br/>fails on time"]
+    D["ticketing events<br/><i>a stream</i><br/>fails on delivery"]
 
     E["BaseExtractor.run()<br/>retry · stamp · validate · merge · watermark"]
 
-    BR["bronze — as landed<br/>payload stored unparsed<br/>append-only, INSERT-only grant"]
-    QU["bronze.quarantine<br/>rejected rows + raw_payload<br/>the batch keeps going"]
-    SI["silver — validated, typed, conformed"]
-    GO["gold — dimensional, joined, serving<br/>facts · dimensions · SCD2"]
-    MCP["MCP server<br/>fixed, parameterised, read-only tools<br/>role holds no grant on PII"]
+    BR["bronze<br/>as landed, unparsed<br/>append-only"]
+    QU["bronze.quarantine<br/>rejected rows<br/>+ raw_payload"]
+    SI["silver<br/>validated, typed,<br/>conformed"]
+    GO["gold<br/>facts · dimensions<br/>SCD2"]
+    MCP["MCP server<br/>fixed read-only tools<br/>no grant on PII"]
     AG["agent"]
 
     A --> E
@@ -170,7 +167,6 @@ flowchart TB
     E -.rejects.-> QU
     BR --> SI --> GO --> MCP --> AG
 
-    style SRC fill:#FAFAFA,stroke:#D0D5DA,color:#333A42
     style A fill:#FFFFFF,stroke:#8C97A3,color:#111418
     style B fill:#FFFFFF,stroke:#8C97A3,color:#111418
     style C fill:#FFFFFF,stroke:#8C97A3,color:#111418
@@ -206,6 +202,10 @@ The status column is the honesty mechanism — `PREDICTED` means reasoned but no
 > If every row here is still `PREDICTED` by the end of Day 4, that is itself a finding — either
 > nothing is being genuinely exercised, or failures are happening and going unnoticed.
 > ([ARCHITECTURE §9](ARCHITECTURE.md#9-the-revision-ritual), the all-predicted rule.)
+>
+> Row two is currently ahead of the code: `FileExtractor` still rejects a file whole, which is the
+> ADR-005 clause that [ADR-011](DECISIONS.md#adr-011--quarantine-bad-rows-do-not-fail-the-whole-batch)
+> superseded. Row-level quarantine is the decision; the extractor has not caught up to it yet.
 
 ### The order in `run()` is load-bearing
 
@@ -227,7 +227,7 @@ sequenceDiagram
     E->>Q: write rejected rows, with reason and raw_payload
     E->>B: merge accepted rows on _payload_hash (INSERT … ON CONFLICT DO NOTHING)
     E->>W: write watermark — only now
-    Note over E,W: crash before this line re-fetches;<br/>crash after it never skips
+    Note over E,W: a crash before this line re-fetches — a crash after it never skips
 ```
 
 `run()` is final — `__init_subclass__` raises if a subclass tries to override it. Subclasses
@@ -331,9 +331,9 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | `run()` order, retry with full jitter, quarantine routing, watermark-last | `pytest tests/extractors/test_base.py -q` | 11 passed |
 | every bronze row carries the four audit columns; `_payload_hash` is stable across runs | `pytest tests/extractors/test_stamp.py -q` | 3 passed |
 | TMDB pagination, `429` + `Retry-After`, incremental date filter — all mocked | `pytest tests/extractors/test_tmdb.py -q` | 9 passed |
-| a re-run produces **zero** duplicates, against a throwaway Postgres | `pytest tests/test_idempotency.py -q` | 4 skipped without a database |
+| a re-run produces **zero** duplicates, against a throwaway Postgres | `CINEMA_TEST_DATABASE_URL=… pytest tests/test_idempotency.py -q` | 4 skipped with no database reachable |
 | bronze is append-only in the source tree as well as in the grants | `./scripts/prove-bronze-immutable.sh` | **currently red — see below** |
-| the extractor role physically cannot `UPDATE` bronze | `psql -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
+| the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
 
 > [!WARNING]
@@ -441,7 +441,7 @@ sql/
 
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
-tests/                     30 tests; all HTTP mocked, no live calls in CI
+tests/                     30 tests; all HTTP mocked, no live API calls
 ```
 
 ---
