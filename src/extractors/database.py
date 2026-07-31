@@ -8,7 +8,6 @@ in the same transaction as the bronze insert — never before.
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -17,8 +16,6 @@ import psycopg
 from psycopg.rows import dict_row
 
 from extractors.base import BaseExtractor
-
-logger = logging.getLogger(__name__)
 
 SOURCE_NAME = "cinema_ops"
 DEFAULT_SOURCE_TABLE = "cinema_ops.bookings"
@@ -56,6 +53,7 @@ class DatabaseExtractor(BaseExtractor):
                 f"expected one of {sorted(_ALLOWED_SOURCE_TABLES)}"
             )
         kwargs.setdefault("source", SOURCE_NAME)
+        kwargs.setdefault("asset_key", "bronze/raw_cinema_ops")
         super().__init__(**kwargs)
         self.source_dsn = source_dsn
         self.source_table = source_table

@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import random
 import time
 import uuid
@@ -49,8 +48,9 @@ from extractors.base import (
     QuarantineStore,
     RowValidator,
 )
+from logging_config import bind_run_context, clear_run_context, get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 SOURCE_NAME = "ticketing"
 DEFAULT_TOPIC = "ticketing.bookings"
@@ -247,6 +247,7 @@ class EventExtractor:
         delay_seconds: float = 0.0,
         commit_delay_seconds: float = 0.0,
         sleep: Callable[[float], None] = time.sleep,
+        asset_key: str | None = None,
     ) -> None:
         self.consumer = consumer
         self.bronze_store = bronze_store
@@ -255,6 +256,7 @@ class EventExtractor:
         self.validator: RowValidator = validator or DefaultRowValidator()
         self.source = source
         self.dlq_topic = dlq_topic
+        self.asset_key = asset_key or "bronze/raw_ticketing"
         self._clock = clock or (lambda: datetime.now(UTC))
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
         self.delay_seconds = delay_seconds
@@ -269,6 +271,8 @@ class EventExtractor:
         Ordering is load-bearing — do not reorder the steps in the loop. Every
         path writes somewhere durable (bronze, DLQ, or quarantine) and only then
         commits the offset.
+
+        Stage-boundary logs only — never per message (VDE-34).
         """
         processed = 0
         merged = 0
@@ -277,61 +281,88 @@ class EventExtractor:
         committed = 0
         duplicates = 0
         batch_id = self._batch_id_factory()
-
-        # The ordering IS the task. Everything else is plumbing.
-        for msg in self.consumer:
-            value = _field(msg, "value")
-            row, parse_error = self._try_parse_value(value, batch_id=batch_id)  # 1. parse
-
-            merged_n = 0
-            quarantined_n = 0
-            dead_lettered_n = 0
-
-            if parse_error is not None:
-                dead_lettered_n, quarantined_n = self._reject(msg, row, reason=parse_error)
-            else:
-                assert row is not None
-                ok, error = self.validator.validate(row)
-                if not ok:
-                    dead_lettered_n, quarantined_n = self._reject(
-                        msg, row, reason=error or "validation failed"
-                    )
-                else:
-                    # 2. write, idempotent on _payload_hash
-                    merged_n = self.bronze_store.merge([row], key=BRONZE_MERGE_KEY)
-
-            if self.commit_delay_seconds > 0:
-                self._sleep(self.commit_delay_seconds)
-            self.consumer.commit(msg)  # 3. only now
-
-            processed += 1
-            merged += merged_n
-            quarantined += quarantined_n
-            dead_lettered += dead_lettered_n
-            committed += 1
-            if merged_n == 0 and quarantined_n == 0 and dead_lettered_n == 0:
-                duplicates += 1
-            if self.delay_seconds > 0:
-                self._sleep(self.delay_seconds)
-            if processed % 50 == 0 or processed == 1:
-                print(
-                    f"progress polled={processed} merged={merged} "
-                    f"duplicates={duplicates} quarantined={quarantined} "
-                    f"dead_lettered={dead_lettered}",
-                    flush=True,
-                )
-
-            if max_messages is not None and processed >= max_messages:
-                break
-
-        return ConsumeStats(
-            processed=processed,
-            merged=merged,
-            quarantined=quarantined,
-            dead_lettered=dead_lettered,
-            committed=committed,
-            duplicates=duplicates,
+        bind_run_context(
+            batch_id=batch_id,
+            source=self.source,
+            asset_key=self.asset_key,
         )
+        try:
+            logger.info("run.start")
+            logger.info("extract.start")
+
+            # The ordering IS the task. Everything else is plumbing.
+            for msg in self.consumer:
+                value = _field(msg, "value")
+                row, parse_error = self._try_parse_value(value, batch_id=batch_id)  # 1. parse
+
+                merged_n = 0
+                quarantined_n = 0
+                dead_lettered_n = 0
+
+                if parse_error is not None:
+                    dead_lettered_n, quarantined_n = self._reject(msg, row, reason=parse_error)
+                else:
+                    assert row is not None
+                    ok, error = self.validator.validate(row)
+                    if not ok:
+                        dead_lettered_n, quarantined_n = self._reject(
+                            msg, row, reason=error or "validation failed"
+                        )
+                    else:
+                        # 2. write, idempotent on _payload_hash
+                        merged_n = self.bronze_store.merge([row], key=BRONZE_MERGE_KEY)
+
+                if self.commit_delay_seconds > 0:
+                    self._sleep(self.commit_delay_seconds)
+                self.consumer.commit(msg)  # 3. only now
+
+                processed += 1
+                merged += merged_n
+                quarantined += quarantined_n
+                dead_lettered += dead_lettered_n
+                committed += 1
+                if merged_n == 0 and quarantined_n == 0 and dead_lettered_n == 0:
+                    duplicates += 1
+                if self.delay_seconds > 0:
+                    self._sleep(self.delay_seconds)
+
+                if max_messages is not None and processed >= max_messages:
+                    break
+
+            logger.info("extract.end", row_count=processed)
+            logger.info(
+                "validation.end",
+                accepted=merged + duplicates,
+                rejected=quarantined + dead_lettered,
+                quarantined=quarantined,
+                dead_lettered=dead_lettered,
+            )
+            logger.info(
+                "merge.end",
+                merged=merged,
+                quarantined=quarantined,
+                duplicates=duplicates,
+            )
+            stats = ConsumeStats(
+                processed=processed,
+                merged=merged,
+                quarantined=quarantined,
+                dead_lettered=dead_lettered,
+                committed=committed,
+                duplicates=duplicates,
+            )
+            logger.info(
+                "run.end",
+                fetched=stats.processed,
+                merged=stats.merged,
+                quarantined=stats.quarantined,
+                dead_lettered=stats.dead_lettered,
+                committed=stats.committed,
+                duplicates=stats.duplicates,
+            )
+            return stats
+        finally:
+            clear_run_context()
 
     def _reject(
         self,
@@ -373,11 +404,11 @@ class EventExtractor:
         self.dlq_producer.produce(topic=self.dlq_topic, value=raw, headers=headers)
         self.dlq_producer.flush()
         logger.warning(
-            "dead-lettered message topic=%s partition=%s offset=%s reason=%s",
-            topic,
-            partition,
-            offset,
-            reason,
+            "dead_letter.end",
+            topic=topic,
+            partition=partition,
+            offset=offset,
+            reason=reason,
         )
 
     def validate(self, msg: ConsumerMessage, *, batch_id: str) -> dict[str, Any]:
