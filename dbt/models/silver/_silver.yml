@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: stg_films
+    description: >
+      One row = one TMDB film, typed and deduplicated on film_id keeping the
+      latest _ingested_at.
+    columns:
+      - name: film_id
+        description: TMDB film identifier — natural key.
+        data_tests:
+          - not_null
+          - unique
+      - name: title
+      - name: original_title
+      - name: original_language
+      - name: release_date
+      - name: overview
+      - name: popularity
+      - name: vote_average
+      - name: vote_count
+      - name: is_adult
+      - name: _ingested_at
+      - name: _source
+      - name: _batch_id
+      - name: _payload_hash
+
+  - name: stg_sessions
+    description: >
+      One row = one landing-file session, typed and deduplicated on session_id
+      keeping the latest _ingested_at.
+    columns:
+      - name: session_id
+        description: Upstream session identifier — natural key.
+        data_tests:
+          - not_null
+          - unique
+      - name: site_id
+      - name: film_id
+      - name: starts_at
+      - name: _ingested_at
+      - name: _source
+      - name: _batch_id
+      - name: _payload_hash
+
+  - name: stg_bookings
+    description: >
+      One row = one cinema_ops booking, typed and deduplicated on booking_id
+      keeping the latest _ingested_at.
+    columns:
+      - name: booking_id
+        description: Operational booking identifier — natural key.
+        data_tests:
+          - not_null
+          - unique
+      - name: cinema_id
+      - name: amount
+      - name: updated_at
+      - name: _ingested_at
+      - name: _source
+      - name: _batch_id
+      - name: _payload_hash
+
+  - name: stg_ticket_events
+    description: >
+      One row = one ticketing stream event, typed and deduplicated on event_id
+      keeping the latest _ingested_at.
+    columns:
+      - name: event_id
+        description: Stream event identifier — natural key.
+        data_tests:
+          - not_null
+          - unique
+      - name: event_time
+      - name: booking_id
+      - name: ticket_id
+      - name: cinema_id
+      - name: seat
+      - name: channel
+      - name: amount
+      - name: _ingested_at
+      - name: _source
+      - name: _batch_id
+      - name: _payload_hash

@@ -13,3 +13,7 @@ var/
 .env
 .env.*
 !.env.example
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
