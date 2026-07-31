@@ -42,6 +42,7 @@ from extractors.events import (  # noqa: E402
 )
 from extractors.files import FileExtractor  # noqa: E402
 from stores.database import TransactionalCinemaOpsStore  # noqa: E402
+from stores.pipeline_runs import MetaPipelineRunStore, asset_key_for_source  # noqa: E402
 from stores.postgres import (  # noqa: E402
     DsnQuarantineStore,
     LandingBronzeStore,
@@ -71,6 +72,10 @@ def _load_dotenv() -> None:
             os.environ.setdefault(key, value)
 
 
+def _pipeline_run_store(dsn: str, source: str) -> MetaPipelineRunStore:
+    return MetaPipelineRunStore(dsn, asset_key=asset_key_for_source(source))
+
+
 def _bootstrap_landing_schema(dsn: str) -> None:
     """Apply VDE-14 quarantine + VDE-13 landing DDL (idempotent)."""
     root = _repo_root()
@@ -79,6 +84,7 @@ def _bootstrap_landing_schema(dsn: str) -> None:
         str(root / "sql" / "bronze" / "001_quarantine.sql"),
         str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
         str(root / "sql" / "001_bronze.sql"),
+        str(root / "sql" / "meta" / "002_pipeline_runs.sql"),
     )
 
 
@@ -102,6 +108,7 @@ def _bootstrap_database_schema(dsn: str) -> None:
         str(root / "sql" / "bronze" / "001_quarantine.sql"),
         str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
         str(root / "sql" / "meta" / "001_watermarks.sql"),
+        str(root / "sql" / "meta" / "002_pipeline_runs.sql"),
         str(root / "sql" / "cinema_ops" / "001_bookings.sql"),
         str(root / "sql" / "bronze" / "003_raw_cinema_ops.sql"),
     )
@@ -134,6 +141,7 @@ def cmd_extract_files(args: argparse.Namespace) -> int:
         state_store=LandingStateStore(dsn),
         bronze_store=LandingBronzeStore(dsn),
         quarantine_store=DsnQuarantineStore(dsn),
+        pipeline_run_store=_pipeline_run_store(dsn, "landing_files"),
     )
     result = extractor.run()
     print(
@@ -158,6 +166,7 @@ def cmd_extract_database(args: argparse.Namespace) -> int:
             state_store=store,
             bronze_store=store,
             quarantine_store=DsnQuarantineStore(dsn),
+            pipeline_run_store=_pipeline_run_store(dsn, "cinema_ops"),
         )
         result = extractor.run()
     print(
