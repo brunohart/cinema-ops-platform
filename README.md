@@ -335,6 +335,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | bronze is append-only in the source tree as well as in the grants | `./scripts/prove-bronze-immutable.sh` | **currently red — see below** |
 | the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
+| every gold fact has one row per declared grain key | `./scripts/prove_fact_grain.sh` | [recorded](docs/2026-07-31-vde-26-fact-grain.md) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -404,15 +405,15 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#7](https://github.com/brunohart/cinema-ops-platform/pull/7) | VDE-13 | file extractor with Pydantic schema-drift detection at the ingest boundary | merged |
 | [#8](https://github.com/brunohart/cinema-ops-platform/pull/8) | VDE-17 | `cinema_ops` clock skew — `SAFETY_LAG` overlap on incremental reads | in flight |
 | [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | in flight |
+| — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
 
 ### Specified, not yet built
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
-`silver` and `gold` models (dbt) · Dagster assets and the SLA checks from
-[ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the Redpanda stream
-consumer · the MCP server and its tool set · the evaluation layer, including adversarial
-prompt-injection testing.
+`silver` and `gold` **dbt** models (grain scaffold only — see VDE-26) · Dagster assets and the SLA
+checks from [ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the MCP
+server and its tool set · the evaluation layer, including adversarial prompt-injection testing.
 
 ---
 
@@ -438,6 +439,7 @@ sql/
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
   bronze/001_quarantine.sql     raw_payload is the point
+  gold/001_fact_grains.sql      grain keys enforced before the dbt model
 
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
