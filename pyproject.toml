@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "AI-native data pipelines for a cinema operations platform"
 requires-python = ">=3.11"
 dependencies = [
+<<<<<<< HEAD
   "psycopg[binary]>=3.1",
+=======
+    "psycopg[binary]>=3.1",
+>>>>>>> origin/main
 ]
 
 [project.optional-dependencies]
