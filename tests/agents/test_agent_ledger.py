@@ -406,6 +406,31 @@ def test_a_run_that_changed_the_repo_cannot_finish_unrecorded(project: Path) -> 
     assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
 
 
+def test_a_run_that_committed_and_pushed_its_work_still_owes_its_entries(project: Path) -> None:
+    """The hole this closes: a clean tree with nothing ahead of upstream is how a cloud run ends."""
+    _hook(project, "pre-tool", {"conversation_id": "s1", "tool_name": "Read"})  # takes the baseline
+    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "the work"],
+        cwd=project,
+        check=True,
+    )
+
+    assert subprocess.run(
+        ["git", "status", "--porcelain"], cwd=project, capture_output=True, text=True, check=True
+    ).stdout == ""
+    response = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
+    assert "has not recorded" in response["followup_message"]
+
+
+def test_the_baseline_is_recorded_at_the_first_hook_of_the_run(project: Path) -> None:
+    _hook(project, "pre-tool", {"conversation_id": "s1", "tool_name": "Read"})
+    state = json.loads((project / ".cursor/.runs/s1.json").read_text(encoding="utf-8"))
+
+    assert state["baseline"]["branch"]
+    assert "head" in state["baseline"]
+
+
 def test_a_run_that_changed_nothing_is_not_nagged(project: Path) -> None:
     """A question is not an issue: with a clean tree and no new commits, the hook stays quiet."""
     commit = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baseline"]

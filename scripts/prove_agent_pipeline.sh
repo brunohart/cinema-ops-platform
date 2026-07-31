@@ -160,6 +160,15 @@ echo '{"conversation_id":"proof","status":"completed"}' | hook stop >"$WORK/stop
 grep -q "has not recorded" "$WORK/stop.json" || fail "a repo-changing run was allowed to finish unrecorded"
 pass "the stop hook hands back a run that changed the repository with no phase entries"
 
+# The way a cloud run actually ends: everything committed, clean tree, nothing ahead of upstream.
+git -C "$PROJECT" add -A
+git -C "$PROJECT" -c user.email=proof@local -c user.name=proof commit -qm "the work"
+[[ -z "$(git -C "$PROJECT" status --porcelain)" ]] || fail "the proof project is not clean after committing"
+echo '{"conversation_id":"proof","status":"completed"}' | hook stop >"$WORK/stop-committed.json"
+grep -q "has not recorded" "$WORK/stop-committed.json" \
+  || fail "a run that committed its work escaped the ledger requirement"
+pass "committing the work does not escape it — HEAD is compared against the run's own baseline"
+
 for phase in plan implement verify; do
   "$PYTHON" scripts/agent_ledger.py append --phase "$phase" --model claude-opus-5 --session proof \
     --summary "$phase phase of the proof run" --lesson "recorded by ${phase} during the proof" >/dev/null

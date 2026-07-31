@@ -108,10 +108,32 @@ def git(*args: str) -> str:
     return out.stdout.strip()
 
 
-def run_changed_the_repo() -> bool:
-    """A run with no diff and no new commits was a question, not an issue."""
+def record_baseline(state: dict[str, Any]) -> None:
+    """Where the repository stood when this run's first hook fired."""
+    if "baseline" not in state:
+        state["baseline"] = {
+            "head": git("rev-parse", "HEAD"),
+            "branch": git("rev-parse", "--abbrev-ref", "HEAD"),
+        }
+
+
+def run_changed_the_repo(state: dict[str, Any]) -> bool:
+    """A run with no diff and no new commit was a question, not an issue.
+
+    HEAD is compared against this run's own baseline rather than against the upstream branch: a run
+    that commits *and pushes* leaves a clean tree with nothing ahead of upstream, and that is how
+    cloud agents finish. Without the baseline, the most common way of doing real work would be the
+    one way to escape recording it.
+    """
     if git("status", "--porcelain"):
         return True
+
+    baseline = state.get("baseline") or {}
+    head = git("rev-parse", "HEAD")
+    if baseline.get("head"):
+        return bool(head) and head != baseline["head"]
+
+    # No baseline (no hook fired early enough): fall back to what the branch itself shows.
     for base in ("@{upstream}", "origin/main"):
         count = git("rev-list", "--count", f"{base}..HEAD")
         if count.isdigit():
@@ -153,6 +175,7 @@ def handle_pre_tool(data: dict[str, Any]) -> None:
     session = str(data.get("conversation_id") or "unknown")
     tool = str(data.get("tool_name") or "")
     state = read_state(session)
+    record_baseline(state)
     # No `permission` key: this hook exists to carry context, never to widen what is allowed.
     response: dict[str, Any] = {}
 
@@ -203,6 +226,7 @@ def handle_subagent_start(data: dict[str, Any]) -> None:
 
     if phase:
         state = read_state(session)
+        record_baseline(state)
         state.setdefault("phases", {})[phase] = {
             "subagent": subagent,
             "model": actual,
@@ -283,7 +307,10 @@ def handle_subagent_stop(data: dict[str, Any]) -> None:
 
 def handle_stop(data: dict[str, Any]) -> None:
     session = str(data.get("conversation_id") or "unknown")
-    if OFF or str(data.get("status")) != "completed" or not run_changed_the_repo():
+    if OFF or str(data.get("status")) != "completed":
+        emit({})
+        return
+    if not run_changed_the_repo(read_state(session)):
         emit({})
         return
 
