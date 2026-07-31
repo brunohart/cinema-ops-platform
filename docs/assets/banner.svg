@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 380" width="1280" height="380" role="img" aria-label="cinema-ops-platform - the read path. Four source shapes landing into bronze, silver and gold, behind a bounded read-only agent interface.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B0D10"/>
+      <stop offset="60%" stop-color="#0E1116"/>
+      <stop offset="100%" stop-color="#12161C"/>
+    </linearGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#C08B4F"/>
+      <stop offset="45%" stop-color="#9AA3AD"/>
+      <stop offset="100%" stop-color="#E0B24C" stop-opacity="0.15"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="380" fill="url(#bg)"/>
+  <rect width="1280" height="380" fill="none" stroke="#1D232B" stroke-width="2"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="64" y="72" fill="#7C8794" font-size="14" letter-spacing="4.5">THEATRICAL &#183; RESEARCH 01 &#183; IN BUILD</text>
+    <text x="64" y="148" fill="#F3F5F7" font-size="54" letter-spacing="-1">cinema-ops-platform</text>
+  </g>
+
+  <rect x="64" y="176" width="620" height="3" fill="url(#rule)"/>
+
+  <g font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">
+    <text x="64" y="218" fill="#C4CBD3" font-size="21">The read path &#8212; the half of platform work that lets you</text>
+    <text x="64" y="248" fill="#C4CBD3" font-size="21">ask a system a question it was never designed to answer.</text>
+    <text x="64" y="288" fill="#7C8794" font-size="15">A governed, agent-queryable data platform for cinema exhibition.</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5">
+    <rect x="64" y="316" width="156" height="28" rx="14" fill="#161B22" stroke="#2A323C"/>
+    <text x="82" y="334.5" fill="#C08B4F">shapes, not sources</text>
+
+    <rect x="230" y="316" width="182" height="28" rx="14" fill="#161B22" stroke="#2A323C"/>
+    <text x="248" y="334.5" fill="#B9C0C8">absence, not redaction</text>
+
+    <rect x="422" y="316" width="188" height="28" rx="14" fill="#161B22" stroke="#2A323C"/>
+    <text x="440" y="334.5" fill="#E0B24C">raw data is optionality</text>
+  </g>
+
+  <g transform="translate(832, 52) scale(0.92)">
+    <g stroke="#39424E" stroke-width="1.6" fill="none">
+      <path d="M78 34 C 128 34, 128 62, 168 62"/>
+      <path d="M78 86 C 128 86, 128 62, 168 62"/>
+      <path d="M78 138 C 128 138, 128 62, 168 62"/>
+      <path d="M78 190 C 128 190, 128 62, 168 62"/>
+    </g>
+
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" fill="#8B95A1">
+      <circle cx="30" cy="34" r="11" fill="none" stroke="#C08B4F" stroke-width="1.8"/>
+      <text x="-6" y="16" text-anchor="end">api</text>
+
+      <rect x="19" y="75" width="22" height="22" rx="3" fill="none" stroke="#C08B4F" stroke-width="1.8"/>
+      <text x="-6" y="68" text-anchor="end">file</text>
+
+      <path d="M19 132 a11 5 0 0 1 22 0 v12 a11 5 0 0 1 -22 0 z" fill="none" stroke="#C08B4F" stroke-width="1.8"/>
+      <path d="M19 132 a11 5 0 0 0 22 0" fill="none" stroke="#C08B4F" stroke-width="1.8"/>
+      <text x="-6" y="120" text-anchor="end">db</text>
+
+      <path d="M30 179 l12 21 h-24 z" fill="none" stroke="#C08B4F" stroke-width="1.8"/>
+      <text x="-6" y="172" text-anchor="end">stream</text>
+    </g>
+
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+      <rect x="168" y="44" width="188" height="36" rx="6" fill="#1A1410" stroke="#C08B4F" stroke-width="1.4"/>
+      <text x="186" y="67" fill="#C08B4F">bronze &#183; as landed</text>
+
+      <rect x="168" y="92" width="188" height="36" rx="6" fill="#14181C" stroke="#8C97A3" stroke-width="1.4"/>
+      <text x="186" y="115" fill="#B9C0C8">silver &#183; conformed</text>
+
+      <rect x="168" y="140" width="188" height="36" rx="6" fill="#1B1708" stroke="#E0B24C" stroke-width="1.4"/>
+      <text x="186" y="163" fill="#E0B24C">gold &#183; serving</text>
+
+      <path d="M262 80 v12 M262 128 v12" stroke="#39424E" stroke-width="1.6"/>
+    </g>
+
+    <line x1="140" y1="200" x2="384" y2="200" stroke="#4A5563" stroke-width="1.4" stroke-dasharray="5 5"/>
+    <text x="384" y="194" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11" fill="#6F7A87">read-only &#183; no PII &#183; fixed tool set</text>
+
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+      <rect x="168" y="214" width="188" height="36" rx="6" fill="#101418" stroke="#4A5563" stroke-width="1.4"/>
+      <text x="186" y="237" fill="#9AA5B1">agent</text>
+      <path d="M330 227 v-4 a5 5 0 0 1 10 0 v4" fill="none" stroke="#9AA5B1" stroke-width="1.4"/>
+      <rect x="328" y="227" width="14" height="11" rx="2" fill="none" stroke="#9AA5B1" stroke-width="1.4"/>
+    </g>
+  </g>
+</svg>
