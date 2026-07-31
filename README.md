@@ -434,6 +434,7 @@ its tool set · the evaluation layer, including adversarial prompt-injection tes
 ARCHITECTURE.md            what the system is — living, revised, never tidied
 DECISIONS.md               ADR-001…011, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
+RUNBOOK.md                 three likely failures — symptom first, then what on-call does
 docker-compose.yml         Postgres 16, DDL applied at init — the reference environment
 
 src/
