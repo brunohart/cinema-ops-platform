@@ -20,6 +20,10 @@ ALTER TABLE gold.fct_showtime_performance
     ADD COLUMN IF NOT EXISTS cinema_key text,
     ADD COLUMN IF NOT EXISTS date_key integer;
 
+-- film_key on booking fact for C1 orphan_film_keys (VDE-35 / dbt gold.fct_booking).
+ALTER TABLE gold.fct_booking
+    ADD COLUMN IF NOT EXISTS film_key text;
+
 CREATE TABLE IF NOT EXISTS gold.dim_film (
     film_key  text PRIMARY KEY,
     film_id   text NOT NULL
@@ -65,3 +69,7 @@ SET
     cinema_key = COALESCE(cinema_key, 'CK-SYL'),
     date_key = COALESCE(date_key, 20260731)
 WHERE showtime_key = 'S-7PM-1';
+
+UPDATE gold.fct_booking
+SET film_key = COALESCE(film_key, 'FK-DEMO')
+WHERE booking_id IN ('B-100', 'B-101');

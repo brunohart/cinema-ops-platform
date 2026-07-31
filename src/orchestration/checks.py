@@ -1,16 +1,21 @@
-"""Dagster asset checks on gold — ARCHITECTURE §5c + Model 11 (VDE-31).
+"""Dagster asset checks from ARCHITECTURE §5 (VDE-31 / VDE-35).
 
-Severity split (do not invert — alert fatigue starts here):
-  · distribution (row-count delta ±20%) → WARN
-  · integrity (null-rate on required fields, orphan FKs) → ERROR
+VDE-31 — gold distribution + integrity (Model 11):
+  · row-count delta ±20% → WARN
+  · null-rate on required fields (§5c C2) → ERROR
+  · referential integrity / orphan FKs (§5c C1) → ERROR
 
-Thresholds come from ARCHITECTURE.md. The ±20% row-count band is the Model 11
-signal stated in the issue — WARN, not a fault.
+VDE-35 — what the Slack sensor alerts on:
+  · C1 orphan_film_keys on fct_booking
+  · last-update freshness checks for §5a promises (WARN)
 
-Note: no ``from __future__ import annotations`` here — Dagster validates the
+Every threshold here is stated in §5. A check with no line there is decoration.
+
+Note: no ``from __future__ import annotations`` — Dagster validates the
 ``context`` parameter annotation by identity and stringified hints fail.
 """
 
+from datetime import timedelta
 from typing import Any
 
 import psycopg
@@ -21,6 +26,7 @@ from dagster import (
     AssetKey,
     MetadataValue,
     asset_check,
+    build_last_update_freshness_checks,
 )
 
 from orchestration.resources import PipelineConfig
@@ -29,7 +35,6 @@ from orchestration.resources import PipelineConfig
 ROW_COUNT_DELTA_TOLERANCE = 0.20
 
 # ARCHITECTURE §5c C2 — null rate on required fields. Promise: 0.
-# Do not invent thresholds; only these columns, only this number.
 NULL_RATE_THRESHOLDS: dict[str, dict[str, float]] = {
     "fct_ticket_sale": {
         "ticket_id": 0.0,
@@ -40,7 +45,6 @@ NULL_RATE_THRESHOLDS: dict[str, dict[str, float]] = {
 }
 
 # ARCHITECTURE §5c C1 — orphan facts whose dimension key has no match. Promise: 0.
-# Fact → dimension FK pairs from §3c / §6b.
 FACT_DIMENSION_FKS: dict[str, list[tuple[str, str, str]]] = {
     "fct_ticket_sale": [
         ("film_key", "dim_film", "film_key"),
@@ -76,12 +80,7 @@ def _table_row_count(conn: Any, table: str) -> int:
 
 
 def _prior_row_count(context: AssetCheckExecutionContext, asset_key: AssetKey) -> int | None:
-    """Row count from the materialisation *before* the latest one.
-
-    Asset checks run after the current materialisation is written, so
-    ``limit=2`` → records[0] is current, records[1] is previous. No previous
-    materialisation means no baseline — the check passes (nothing to delta).
-    """
+    """Row count from the materialisation *before* the latest one."""
     result = context.instance.fetch_materializations(asset_key, limit=2)
     records = result.records
     if len(records) < 2:
@@ -97,6 +96,24 @@ def _prior_row_count(context: AssetCheckExecutionContext, asset_key: AssetKey) -
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _batch_id_from_latest_materialization(context, asset_key: AssetKey) -> str:
+    """Pull batch_id from the latest materialization metadata when present."""
+    event = context.instance.get_latest_materialization_event(asset_key)
+    if event is None or event.asset_materialization is None:
+        return "n/a"
+    meta = event.asset_materialization.metadata or {}
+    raw = meta.get("batch_id")
+    if raw is None:
+        return "n/a"
+    value = getattr(raw, "value", None)
+    if value is not None:
+        return str(value)
+    text = getattr(raw, "text", None)
+    if text is not None:
+        return str(text)
+    return str(raw)
 
 
 def _row_count_delta_result(
@@ -129,7 +146,6 @@ def _row_count_delta_result(
 
     metadata["prior_row_count"] = MetadataValue.int(prior)
     if prior == 0:
-        # Zero → non-zero is an infinite relative delta; warn if we grew from empty.
         passed = current == 0
         delta_pct = None if current == 0 else float("inf")
     else:
@@ -253,7 +269,7 @@ def _referential_integrity_result(
 
 
 # ---------------------------------------------------------------------------
-# Row-count delta — every gold asset (WARN)
+# Row-count delta — every gold asset (WARN) — VDE-31
 # ---------------------------------------------------------------------------
 
 
@@ -356,7 +372,7 @@ def dim_date_row_count_delta(
 
 
 # ---------------------------------------------------------------------------
-# Null-rate — §5c C2 required fields (ERROR)
+# Null-rate — §5c C2 required fields (ERROR) — VDE-31
 # ---------------------------------------------------------------------------
 
 
@@ -375,7 +391,7 @@ def fct_ticket_sale_null_rate(
 
 
 # ---------------------------------------------------------------------------
-# Referential integrity — §5c C1 (ERROR)
+# Referential integrity — §5c C1 (ERROR) — VDE-31
 # ---------------------------------------------------------------------------
 
 
@@ -411,6 +427,100 @@ def fct_showtime_performance_referential_integrity(
     )
 
 
+# ---------------------------------------------------------------------------
+# Correctness — C1 orphan facts on fct_booking (ARCHITECTURE §5c) — VDE-35
+# ---------------------------------------------------------------------------
+
+
+@asset_check(
+    asset=AssetKey(["gold", "fct_booking"]),
+    name="orphan_film_keys",
+    description=(
+        "C1 — fact rows whose film_key has no match in dim_film. Promise: 0. "
+        "Inner joins drop orphans silently; the revenue number goes quietly low."
+    ),
+    required_resource_keys={"pipeline_config"},
+)
+def orphan_film_keys(context) -> AssetCheckResult:
+    """Count gold.fct_booking rows with no matching gold.dim_film.film_key."""
+    pipeline_config: PipelineConfig = context.resources.pipeline_config
+    dsn = pipeline_config.dsn()
+    threshold = 0
+
+    with psycopg.connect(dsn) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select count(*) from gold.fct_booking b
+                left join gold.dim_film f using (film_key)
+                where f.film_key is null
+                """
+            )
+            observed = int(cur.fetchone()[0])
+
+    batch_id = _batch_id_from_latest_materialization(
+        context, AssetKey(["gold", "fct_booking"])
+    )
+    passed = observed <= threshold
+    return AssetCheckResult(
+        passed=passed,
+        severity=AssetCheckSeverity.ERROR,
+        description=(
+            f"orphan film_keys observed={observed} threshold={threshold} "
+            f"batch_id={batch_id}"
+        ),
+        metadata={
+            "observed": MetadataValue.int(observed),
+            "threshold": MetadataValue.int(threshold),
+            "batch_id": MetadataValue.text(batch_id),
+            "promise": MetadataValue.text("ARCHITECTURE §5c C1 — 0 orphans"),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Freshness — ARCHITECTURE §5a (WARN; sensor pages the breach) — VDE-35
+# ---------------------------------------------------------------------------
+
+FRESHNESS_CHECKS = [
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["bronze", "raw_ticketing"])],
+        lower_bound_delta=timedelta(minutes=15),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["bronze", "raw_cinema_ops"])],
+        lower_bound_delta=timedelta(hours=1),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["bronze", "raw_landing_files"])],
+        lower_bound_delta=timedelta(hours=6),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["bronze", "raw_tmdb"])],
+        lower_bound_delta=timedelta(hours=24),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["gold", "fct_ticket_sale"])],
+        lower_bound_delta=timedelta(hours=3),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["gold", "fct_booking"])],
+        lower_bound_delta=timedelta(hours=3),
+        severity=AssetCheckSeverity.WARN,
+    ),
+    *build_last_update_freshness_checks(
+        assets=[AssetKey(["gold", "dim_film"])],
+        lower_bound_delta=timedelta(hours=24),
+        severity=AssetCheckSeverity.WARN,
+    ),
+]
+
+# VDE-31 distribution + integrity checks (prove_asset_checks.sh).
 ALL_ASSET_CHECKS = [
     fct_ticket_sale_row_count_delta,
     fct_booking_row_count_delta,
@@ -422,3 +532,7 @@ ALL_ASSET_CHECKS = [
     fct_ticket_sale_referential_integrity,
     fct_showtime_performance_referential_integrity,
 ]
+
+CORRECTNESS_CHECKS = [orphan_film_keys]
+# Full set registered on Definitions — Slack sensor + Checks tab.
+ALL_CHECKS = [*ALL_ASSET_CHECKS, *CORRECTNESS_CHECKS, *FRESHNESS_CHECKS]

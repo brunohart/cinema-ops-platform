@@ -491,27 +491,35 @@ def fct_ticket_sale(
 @asset(
     key_prefix="gold",
     description=(
-        "One booking — one transaction, whatever number of tickets it contained "
-        "(ARCHITECTURE §3a). Asset check: row-count Δ (WARN)."
+        "One booking transaction — whatever number of tickets it contained. "
+        "Keys + measures only (ARCHITECTURE §3a / VDE-25). Orphan film_key "
+        "check is C1 (ARCHITECTURE §5c); freshness ≤ 3h with the ticket grain. "
+        "Also carries row-count Δ (WARN — VDE-31)."
     ),
     ins={
-        "stg_ticketing": AssetIn(key_prefix="silver"),
+        "dim_film": AssetIn(key_prefix="gold"),
         "stg_cinema_ops": AssetIn(key_prefix="silver"),
+        "stg_ticketing": AssetIn(key_prefix="silver"),
     },
 )
 def fct_booking(
     context: AssetExecutionContext,
     pipeline_config: PipelineConfig,
-    stg_ticketing: None,
+    dim_film: None,
     stg_cinema_ops: None,
+    stg_ticketing: None,
 ) -> MaterializeResult:
+    """Lineage + row_count metadata for gold.fct_booking; checks attach here."""
     return _gold_materialize(
         context,
         pipeline_config,
         table="fct_booking",
         extra_metadata={
             "upstreams": MetadataValue.text(
-                "silver/stg_ticketing, silver/stg_cinema_ops"
+                "gold/dim_film, silver/stg_cinema_ops, silver/stg_ticketing"
+            ),
+            "grain": MetadataValue.text(
+                "one booking transaction, any ticket count"
             ),
         },
     )
