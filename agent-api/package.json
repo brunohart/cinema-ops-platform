@@ -2,23 +2,31 @@
   "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Bounded, allowlisted query surface for the agent read path (VDE-39 / ADR-009)",
+  "description": "Bounded agent read path — allowlisted QUERIES (VDE-39) exposed as MCP tools (VDE-40)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "cinema-ops-mcp": "./dist/mcp.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prove": "bash ../scripts/prove_allowlisted_queries.sh"
+    "mcp": "node dist/mcp.js",
+    "prove": "bash ../scripts/prove_allowlisted_queries.sh",
+    "prove:mcp": "bash ../scripts/prove_mcp.sh",
+    "inspector": "npm run build && npx @modelcontextprotocol/inspector node dist/mcp.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "postgres": "^3.4.9",
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.1",
     "typescript": "^5.7.2"
   }
 }
