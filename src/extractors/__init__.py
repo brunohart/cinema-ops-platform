@@ -3,7 +3,12 @@
 from extractors.base import BaseExtractor, ExtractorResult, RetryPolicy
 from extractors.cinema_ops import SAFETY_LAG, since_with_safety_lag
 from extractors.database import DatabaseExtractor
-from extractors.events import EventExtractor
+from extractors.events import (
+    EventExtractor,
+    EventsExtractor,
+    consume_events,
+    produce_events,
+)
 from extractors.files import FileExtractor
 from extractors.postgres import (
     PostgresBronzeStore,
@@ -17,6 +22,7 @@ __all__ = [
     "BaseExtractor",
     "DatabaseExtractor",
     "EventExtractor",
+    "EventsExtractor",
     "ExtractorResult",
     "FileExtractor",
     "PostgresBronzeStore",
@@ -26,5 +32,7 @@ __all__ = [
     "RetryPolicy",
     "SAFETY_LAG",
     "TMDBExtractor",
+    "consume_events",
+    "produce_events",
     "since_with_safety_lag",
 ]
