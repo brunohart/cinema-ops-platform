@@ -1,6 +1,11 @@
 .DS_Store
 .claude/
 __pycache__/
+
+# agent-api (VDE-39)
+agent-api/node_modules/
+agent-api/dist/
+
 *.py[cod]
 .pytest_cache/
 .coverage
