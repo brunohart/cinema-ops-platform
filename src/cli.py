@@ -218,6 +218,66 @@ def cmd_produce_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bootstrap_agent_schema(dsn: str) -> None:
+    """Apply VDE-41 scoped-token + gold.site_performance DDL."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "init" / "001_schemas.sql"),
+        str(root / "sql" / "meta" / "003_agent_tokens.sql"),
+    )
+
+
+def _parse_int_csv(raw: str) -> list[int]:
+    return [int(p.strip()) for p in raw.split(",") if p.strip()]
+
+
+def _parse_str_csv(raw: str) -> list[str]:
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+def cmd_agent_mint_token(args: argparse.Namespace) -> int:
+    """Mint a scoped token — stores sha256 only; prints plaintext once."""
+    _load_dotenv()
+    dsn = dsn_from_env()
+    if not args.skip_schema:
+        _bootstrap_agent_schema(dsn)
+
+    from agent.mint import mint_token
+
+    site_ids = _parse_int_csv(args.sites)
+    tools = _parse_str_csv(args.tools)
+    if not site_ids or not tools:
+        print("--sites and --tools must be non-empty", file=sys.stderr)
+        return 2
+
+    import psycopg
+
+    with psycopg.connect(dsn) as conn:
+        token = mint_token(
+            conn,
+            label=args.label,
+            site_ids=site_ids,
+            allowed_tools=tools,
+            ttl_hours=args.ttl_hours,
+        )
+    # Plaintext once — the only copy. Hash is what lands in meta.agent_tokens.
+    print(token)
+    return 0
+
+
+def cmd_agent_serve(args: argparse.Namespace) -> int:
+    """Run the tools HTTP server (Bearer + site bind) on :8787."""
+    _load_dotenv()
+    dsn = dsn_from_env()
+    if not args.skip_schema:
+        _bootstrap_agent_schema(dsn)
+
+    from agent.server import main as serve_main
+
+    return serve_main(["--host", args.host, "--port", str(args.port)])
+
+
 def cmd_consume_events(args: argparse.Namespace) -> int:
     """Consume ticketing.bookings with manual offset commits into bronze.events_raw."""
     _load_dotenv()
@@ -379,6 +439,50 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     consume_events_p.set_defaults(func=cmd_consume_events)
+
+    agent = sub.add_parser("agent", help="Scoped agent tokens + tools server (VDE-41)")
+    agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)
+
+    mint = agent_sub.add_parser(
+        "mint-token",
+        help="Insert meta.agent_tokens row; print plaintext bearer once",
+    )
+    mint.add_argument("--label", required=True, help="Human label for the token")
+    mint.add_argument(
+        "--sites",
+        required=True,
+        help="Comma-separated site_ids the token may reach (e.g. 1,2,3)",
+    )
+    mint.add_argument(
+        "--tools",
+        required=True,
+        help="Comma-separated allowed tool names (e.g. get_site_performance)",
+    )
+    mint.add_argument(
+        "--ttl-hours",
+        type=int,
+        default=24,
+        help="Hours until expires_at (default 24)",
+    )
+    mint.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap meta.agent_tokens / gold.site_performance DDL",
+    )
+    mint.set_defaults(func=cmd_agent_mint_token)
+
+    serve_p = agent_sub.add_parser(
+        "serve",
+        help="HTTP tools server on :8787 (Authorization: Bearer)",
+    )
+    serve_p.add_argument("--host", default="127.0.0.1")
+    serve_p.add_argument("--port", type=int, default=8787)
+    serve_p.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap agent token / site_performance DDL",
+    )
+    serve_p.set_defaults(func=cmd_agent_serve)
 
     return parser
 
