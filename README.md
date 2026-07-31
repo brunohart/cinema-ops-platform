@@ -337,6 +337,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
 | silver models type, rename, and dedupe bronze on natural key | `./scripts/prove-silver.sh` | [recorded](docs/2026-07-31-vde-24-silver-proof.md) — `PASS=12` |
+| gold star schema — dims with surrogates, facts with keys + measures only; zero orphan `film_key` | `./scripts/prove-gold.sh` | [recorded](docs/2026-07-31-vde-25-gold-proof.md) — `PASS=35`, orphans `0` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -411,7 +412,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
-`gold` models (dbt) · Dagster assets and the SLA checks from
+Dagster assets and the SLA checks from
 [ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the MCP server and
 its tool set · the evaluation layer, including adversarial prompt-injection testing.
 
@@ -443,6 +444,7 @@ sql/
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors
   models/silver/           stg_* — typed, renamed, deduped on natural key
+  models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
 scripts/                   the proof commands, one per claim

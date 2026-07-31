@@ -1,0 +1,165 @@
+version: 2
+
+models:
+  - name: dim_film
+    description: >
+      One row = one film at one version of its attributes (type-1 current
+      row here; SCD2 history is a separate snapshot path). Surrogate
+      film_key — never the TMDB source id as the join key.
+    columns:
+      - name: film_key
+        description: Surrogate key for the film dimension.
+        data_tests:
+          - not_null
+          - unique
+      - name: film_id
+        description: Natural key — TMDB film id (-1 = Unknown).
+        data_tests:
+          - not_null
+          - unique
+      - name: title
+      - name: original_title
+      - name: original_language
+      - name: release_date
+      - name: runtime_minutes
+      - name: is_adult
+      - name: valid_from
+      - name: valid_to
+      - name: is_current
+
+  - name: dim_site
+    description: >
+      One row = one cinema site (exhibition location), conformed across
+      landing-file site_id and cinema_ops / ticketing cinema_id codes.
+      Surrogate site_key — never a raw source id as the join key.
+    columns:
+      - name: site_key
+        description: Surrogate key for the site dimension.
+        data_tests:
+          - not_null
+          - unique
+      - name: site_bk
+        description: Conformed business key (source_system + natural id).
+        data_tests:
+          - not_null
+          - unique
+      - name: site_code
+      - name: source_system
+      - name: site_name
+
+  - name: dim_date
+    description: >
+      One row = one calendar date. Generated, not sourced. Carries fiscal
+      periods and day-of-week for every time-series question in the demo.
+    columns:
+      - name: date_key
+        description: Surrogate key as YYYYMMDD integer.
+        data_tests:
+          - not_null
+          - unique
+      - name: date_day
+        data_tests:
+          - not_null
+          - unique
+      - name: day_of_week
+        description: ISO day of week (1 = Monday … 7 = Sunday).
+      - name: day_name
+      - name: day_of_month
+      - name: day_of_year
+      - name: week_of_year
+      - name: month_number
+      - name: month_name
+      - name: quarter_number
+      - name: year_number
+      - name: fiscal_year
+        description: Fiscal year starting 1 July (FY label = ending calendar year).
+      - name: fiscal_quarter
+      - name: fiscal_period
+        description: Fiscal month 1–12 within the fiscal year (July = 1).
+      - name: is_weekend
+
+  - name: fct_session
+    description: >
+      Grain: one row = one scheduled session (showtime) at one site for
+      one film. Keys and the session start timestamp only — no film title,
+      site name, or other descriptive attributes.
+    columns:
+      - name: session_id
+        description: Degenerate dimension — upstream session identity.
+        data_tests:
+          - not_null
+          - unique
+      - name: film_key
+        description: FK → dim_film.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_film')
+                field: film_key
+      - name: site_key
+        description: FK → dim_site.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_site')
+                field: site_key
+      - name: date_key
+        description: FK → dim_date (session local/UTC calendar date).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: starts_at
+        description: Session start timestamp (event time at this grain).
+        data_tests:
+          - not_null
+
+  - name: fct_booking
+    description: >
+      Grain: one row = one booking transaction, whatever number of tickets
+      it contained. Foreign keys to dimensions plus booking measures only —
+      no film title, site name, or other descriptive attributes on the fact.
+    columns:
+      - name: booking_id
+        description: Degenerate dimension — booking identity.
+        data_tests:
+          - not_null
+          - unique
+      - name: film_key
+        description: FK → dim_film (Unknown member when source has no film).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_film')
+                field: film_key
+      - name: site_key
+        description: FK → dim_site.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_site')
+                field: site_key
+      - name: date_key
+        description: FK → dim_date (booked_at calendar date).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_date')
+                field: date_key
+      - name: ticket_count
+        description: Measure — tickets in the booking.
+      - name: booking_total
+        description: Measure — total amount for the booking.
+      - name: channel_code
+        description: Degenerate dimension — sales channel code (not a measure).
+      - name: booked_at
+        description: Booking event timestamp.
+        data_tests:
+          - not_null
