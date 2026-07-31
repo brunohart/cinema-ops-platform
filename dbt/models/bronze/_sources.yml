@@ -1,0 +1,45 @@
+version: 2
+
+sources:
+  - name: bronze
+    description: >
+      Append-only raw landings. Payloads are unparsed jsonb plus the four audit
+      columns. Silver casts, renames, and deduplicates — bronze never transforms.
+    schema: bronze
+    tables:
+      - name: film_raw
+        description: One TMDB discover/movie payload as received, plus ingestion metadata.
+        columns:
+          - name: _payload
+          - name: _ingested_at
+          - name: _source
+          - name: _batch_id
+          - name: _payload_hash
+
+      - name: raw_landing_files
+        description: One landing-file session row as received, plus ingestion metadata.
+        columns:
+          - name: _payload
+          - name: _ingested_at
+          - name: _source
+          - name: _batch_id
+          - name: _payload_hash
+
+      - name: raw_cinema_ops
+        description: One cinema_ops booking payload as received, plus ingestion metadata.
+        columns:
+          - name: _payload
+          - name: _ingested_at
+          - name: _source
+          - name: _batch_id
+          - name: _payload_hash
+
+      - name: events_raw
+        description: One ticketing stream payload as received, plus ingestion metadata.
+        columns:
+          - name: event_id
+          - name: _payload
+          - name: _ingested_at
+          - name: _source
+          - name: _batch_id
+          - name: _payload_hash

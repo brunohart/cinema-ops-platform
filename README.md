@@ -321,6 +321,7 @@ an assurance that it works on mine. All HTTP is mocked; there are no live API ca
 git clone https://github.com/brunohart/cinema-ops-platform && cd cinema-ops-platform
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
+pip install -e ".[dbt]"         # dbt-postgres for silver / gold transforms
 
 pytest -q                       # the whole suite
 docker compose up -d db         # Postgres 16, with bronze + quarantine DDL applied at init
@@ -336,6 +337,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
 | four extractors are Dagster assets; lineage edges are function-argument deps | `./scripts/prove_dagster_assets.sh` then `dagster dev -w workspace.yaml` | [recorded](docs/2026-07-31-vde-22-dagster-assets.md) — 10 assets, 9 edges |
+| silver models type, rename, and dedupe bronze on natural key | `./scripts/prove-silver.sh` | [recorded](docs/2026-07-31-vde-24-silver-proof.md) — `PASS=12` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -413,6 +415,9 @@ Stated plainly, because a gap I have named is worth more than a gap a reviewer f
 `silver` and `gold` **dbt transforms** (assets are declared; models not yet) · Dagster asset checks /
 SLAs from [ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the MCP
 server and its tool set · the evaluation layer, including adversarial prompt-injection testing.
+`gold` models (dbt) · Dagster assets and the SLA checks from
+[ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the MCP server and
+its tool set · the evaluation layer, including adversarial prompt-injection testing.
 
 ---
 
@@ -441,6 +446,11 @@ sql/
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
   bronze/001_quarantine.sql     raw_payload is the point
+
+dbt/
+  models/bronze/           sources only — bronze stays DDL + extractors
+  models/silver/           stg_* — typed, renamed, deduped on natural key
+  macros/                  schema names land as silver / gold, not prefixed
 
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map

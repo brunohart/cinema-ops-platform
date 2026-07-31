@@ -16,6 +16,7 @@ module_name = "orchestration.definitions"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+dbt = ["dbt-postgres>=1.8,<1.11"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

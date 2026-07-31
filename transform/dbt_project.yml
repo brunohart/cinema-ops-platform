@@ -1,0 +1,26 @@
+# VDE-27 — first dbt project slice: SCD Type 2 film snapshot.
+# ADR-004: dbt Core for silver/gold. This issue lands one snapshot only.
+name: cinema_ops
+version: 1.0.0
+config-version: 2
+profile: cinema_ops
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+macro-paths: ["macros"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+
+target-path: target
+clean-targets: [target, dbt_packages, logs]
+
+models:
+  cinema_ops:
+    staging:
+      +schema: silver
+      +materialized: view
+
+snapshots:
+  cinema_ops:
+    +target_schema: snapshots
