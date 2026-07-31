@@ -1,19 +1,34 @@
-"""Dagster assets for the cinema-ops medallion graph (VDE-22 / Model 09).
+"""Dagster assets for the cinema-ops medallion graph (VDE-22 / Model 09 / VDE-33).
 
 Bronze assets wrap the four extractors. Silver and gold assets declare what
 should exist downstream — dependencies are function arguments, not an explicit
 ``deps=[...]`` list, so the graph stays readable. Transforms themselves land
 with dbt later; today is the lineage.
+
+Freshness policies attach only to SOURCE (bronze) assets — staleness originates
+at the entry points; downstream freshness is derived (VDE-33 / Model 11).
+Every ``fail_window`` is the promise from ARCHITECTURE §5a; cron cadences match
+those windows so automation can keep freshness in PASS under normal operation.
 """
 
+from datetime import timedelta
 from typing import Any
 
-from dagster import AssetExecutionContext, AssetIn, MaterializeResult, MetadataValue, asset
+from dagster import (
+    AssetExecutionContext,
+    AssetIn,
+    AutomationCondition,
+    FreshnessPolicy,
+    MaterializeResult,
+    MetadataValue,
+    asset,
+)
 
 from orchestration.resources import PipelineConfig, _repo_root
 
 # ---------------------------------------------------------------------------
 # Bronze — one asset per extractor shape (ARCHITECTURE §5a names)
+# Freshness fail_windows and cron ticks are the Day 0 SLA table — not invented here.
 # ---------------------------------------------------------------------------
 
 
@@ -79,6 +94,8 @@ def _bootstrap_events(dsn: str) -> None:
         "TMDB discover/movie payloads as landed — pagination, 429 Retry-After, "
         "incremental primary_release_date filter. Freshness SLA ≤ 24h (ARCHITECTURE §5a)."
     ),
+    automation_condition=AutomationCondition.on_cron("0 0 * * *"),
+    freshness_policy=FreshnessPolicy.time_window(fail_window=timedelta(hours=24)),
 )
 def raw_tmdb(
     context: AssetExecutionContext, pipeline_config: PipelineConfig
@@ -117,6 +134,8 @@ def raw_tmdb(
         "schema drift quarantined with raw_payload retained. Freshness SLA ≤ 6h "
         "(ARCHITECTURE §5a)."
     ),
+    automation_condition=AutomationCondition.on_cron("0 */6 * * *"),
+    freshness_policy=FreshnessPolicy.time_window(fail_window=timedelta(hours=6)),
 )
 def raw_landing_files(
     context: AssetExecutionContext, pipeline_config: PipelineConfig
@@ -155,6 +174,8 @@ def raw_landing_files(
         "cinema_ops bookings pulled incrementally on updated_at — watermark last, "
         "same transaction as bronze insert. Freshness SLA ≤ 1h (ARCHITECTURE §5a)."
     ),
+    automation_condition=AutomationCondition.on_cron("0 * * * *"),
+    freshness_policy=FreshnessPolicy.time_window(fail_window=timedelta(hours=1)),
 )
 def raw_cinema_ops(
     context: AssetExecutionContext, pipeline_config: PipelineConfig
@@ -194,6 +215,8 @@ def raw_cinema_ops(
         "Ticketing booking events from Redpanda — offset committed after bronze "
         "(or DLQ) write, never before. Freshness SLA ≤ 15 min (ARCHITECTURE §5a)."
     ),
+    automation_condition=AutomationCondition.on_cron("*/15 * * * *"),
+    freshness_policy=FreshnessPolicy.time_window(fail_window=timedelta(minutes=15)),
 )
 def raw_ticketing(
     context: AssetExecutionContext, pipeline_config: PipelineConfig

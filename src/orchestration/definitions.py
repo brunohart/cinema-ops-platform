@@ -1,6 +1,9 @@
-"""Dagster Definitions — the code location loaded by ``dagster dev`` (VDE-22).
+"""Dagster Definitions — the code location loaded by ``dagster dev`` (VDE-22 / VDE-33).
 
-No schedules. Today is the asset graph: lineage, layer prefixes, descriptions.
+No classic ``ScheduleDefinition``s. Source (bronze) assets carry
+``AutomationCondition.on_cron`` plus ``FreshnessPolicy.time_window`` from
+ARCHITECTURE §5a; Dagster attaches ``default_automation_condition_sensor``
+(stopped until toggled in Automation).
 """
 
 from __future__ import annotations
