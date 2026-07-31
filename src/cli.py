@@ -11,7 +11,7 @@ Proofs:
     python -m src.cli extract database
     psql $DB -c "select * from meta.watermarks"
 
-    python -m src.cli produce --count 1000
+    python -m src.cli produce events --count 1000
     python -m src.cli consume events
     # SIGKILL mid-stream, then restart consume — VDE-21
     psql $DB -c "select count(*) as rows, count(distinct event_id) as unique_ids
@@ -32,6 +32,13 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from extractors.database import DatabaseExtractor  # noqa: E402
+from extractors.events import (  # noqa: E402
+    DEFAULT_BOOTSTRAP,
+    DEFAULT_GROUP_ID,
+    DEFAULT_TOPIC,
+    consume_events,
+    produce_events,
+)
 from extractors.files import FileExtractor  # noqa: E402
 from stores.database import TransactionalCinemaOpsStore  # noqa: E402
 from stores.postgres import (  # noqa: E402
@@ -41,9 +48,6 @@ from stores.postgres import (  # noqa: E402
     apply_schema_files,
     dsn_from_env,
 )
-from streaming.consumer import EventsBronzeStore, EventsConsumer  # noqa: E402
-from streaming.producer import produce_events  # noqa: E402
-from streaming.transport import FileEventLog, open_event_log  # noqa: E402
 
 
 def _repo_root() -> Path:
@@ -77,6 +81,18 @@ def _bootstrap_landing_schema(dsn: str) -> None:
     )
 
 
+def _bootstrap_events_schema(dsn: str) -> None:
+    """Apply quarantine + events_raw DDL (idempotent)."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "bronze" / "003_events_raw.sql"),
+        str(root / "sql" / "bronze" / "004_events_raw_grants.sql"),
+    )
+
+
 def _bootstrap_database_schema(dsn: str) -> None:
     """Apply VDE-16 meta watermarks + cinema_ops source + bronze landing DDL."""
     root = _repo_root()
@@ -90,14 +106,16 @@ def _bootstrap_database_schema(dsn: str) -> None:
     )
 
 
-def _bootstrap_events_schema(dsn: str) -> None:
-    """Apply VDE-21 events_raw DDL (idempotent)."""
-    root = _repo_root()
-    apply_schema_files(
-        dsn,
-        str(root / "sql" / "bronze" / "003_events_raw.sql"),
-        str(root / "sql" / "bronze" / "004_events_raw_grants.sql"),
-    )
+def _kafka_bootstrap() -> str:
+    return os.environ.get("KAFKA_BOOTSTRAP") or DEFAULT_BOOTSTRAP
+
+
+def _kafka_topic() -> str:
+    return os.environ.get("KAFKA_TOPIC") or DEFAULT_TOPIC
+
+
+def _kafka_group() -> str:
+    return os.environ.get("KAFKA_GROUP_ID") or DEFAULT_GROUP_ID
 
 
 def cmd_extract_files(args: argparse.Namespace) -> int:
@@ -178,57 +196,56 @@ def cmd_extract_tmdb(_args: argparse.Namespace) -> int:
     return 2
 
 
-def cmd_produce(args: argparse.Namespace) -> int:
-    """Publish a known quantity of ticketing events onto the stream."""
+def cmd_produce_events(args: argparse.Namespace) -> int:
+    """Emit synthetic booking events to Redpanda (VDE-18)."""
     _load_dotenv()
-    log = open_event_log()
-    try:
-        if args.reset and isinstance(log, FileEventLog):
-            log.reset(args.topic)
-        run_id, written = produce_events(
-            log,
-            topic=args.topic,
-            count=args.count,
-            run_id=args.run_id,
-        )
-    finally:
-        log.close()
-    print(f"produced={written} topic={args.topic} run_id={run_id}")
+    bootstrap = args.bootstrap or _kafka_bootstrap()
+    topic = args.topic or _kafka_topic()
+    result = produce_events(
+        count=args.count,
+        bootstrap=bootstrap,
+        topic=topic,
+        seed=args.seed,
+        malformed_rate=args.malformed_rate,
+        late_rate=args.late_rate,
+        start_seq=args.start_seq,
+    )
+    print(
+        f"produced={result.produced} malformed={result.malformed} "
+        f"topic={result.topic} bootstrap={bootstrap}"
+    )
     return 0
 
 
-def cmd_consume(args: argparse.Namespace) -> int:
-    """Consume a topic into bronze.events_raw. Kill mid-stream is the honest test."""
+def cmd_consume_events(args: argparse.Namespace) -> int:
+    """Consume ticketing.bookings with manual offset commits into bronze.events_raw."""
     _load_dotenv()
     dsn = dsn_from_env()
     if not args.skip_schema:
         _bootstrap_events_schema(dsn)
 
-    log = open_event_log()
-    store = EventsBronzeStore(dsn)
-    consumer = EventsConsumer(
-        log,
-        store,
-        topic=args.topic,
-        delay_seconds=args.delay_ms / 1000.0,
-        commit_delay_seconds=args.commit_delay_ms / 1000.0,
-    )
-    idle_exit = None if args.forever else args.idle_seconds
+    bootstrap = args.bootstrap or _kafka_bootstrap()
+    topic = args.topic or _kafka_topic()
+    group_id = args.group or _kafka_group()
+
     try:
-        stats = consumer.run_forever(idle_exit_seconds=idle_exit)
-    except KeyboardInterrupt:
-        print(
-            f"interrupted polled={consumer.stats.polled} "
-            f"merged={consumer.stats.merged} "
-            f"duplicates={consumer.stats.duplicates}",
-            flush=True,
+        result = consume_events(
+            dsn=dsn,
+            bootstrap=bootstrap,
+            topic=topic,
+            group_id=group_id,
+            max_messages=None if args.forever else args.max_messages,
+            idle_timeout_seconds=None if args.forever else args.idle_timeout,
+            delay_seconds=args.delay_ms / 1000.0,
+            commit_delay_seconds=args.commit_delay_ms / 1000.0,
         )
+    except KeyboardInterrupt:
+        print("interrupted", flush=True)
         return 130
-    finally:
-        log.close()
     print(
-        f"consumed polled={stats.polled} merged={stats.merged} "
-        f"duplicates={stats.duplicates} batch_id={stats.batch_id}"
+        f"source=ticketing fetched={result.fetched} merged={result.merged} "
+        f"quarantined={result.quarantined} committed={result.committed} "
+        f"duplicates={result.duplicates} batch_id={result.batch_id}"
     )
     return 0
 
@@ -267,62 +284,88 @@ def build_parser() -> argparse.ArgumentParser:
     )
     database.set_defaults(func=cmd_extract_database)
 
-    produce = sub.add_parser("produce", help="Publish ticketing events onto the stream")
-    produce.add_argument(
-        "--count",
-        type=int,
-        default=1000,
-        help="Number of unique events to publish (default: 1000)",
+    produce = sub.add_parser("produce", help="Emit synthetic source data")
+    produce_sub = produce.add_subparsers(dest="source", required=True)
+    produce_events_p = produce_sub.add_parser(
+        "events",
+        help="Synthetic ticketing booking events → Redpanda",
     )
-    produce.add_argument("--topic", default="events", help="Topic name (default: events)")
-    produce.add_argument(
-        "--run-id",
-        default=None,
-        help="Prefix for event_id values (default: random hex)",
+    produce_events_p.add_argument("--count", type=int, default=20, help="Events to emit")
+    produce_events_p.add_argument(
+        "--seed", type=int, default=18, help="Deterministic event_id seed"
     )
-    produce.add_argument(
-        "--reset",
-        action="store_true",
-        help="Wipe the file-backed topic before producing (file transport only)",
+    produce_events_p.add_argument(
+        "--start-seq", type=int, default=1, help="First sequence number"
     )
-    produce.set_defaults(func=cmd_produce)
+    produce_events_p.add_argument(
+        "--malformed-rate",
+        type=float,
+        default=0.05,
+        help="Fraction of deliberately broken JSON payloads",
+    )
+    produce_events_p.add_argument(
+        "--late-rate",
+        type=float,
+        default=0.25,
+        help="Fraction with event_time a few minutes in the past",
+    )
+    produce_events_p.add_argument(
+        "--bootstrap", default=None, help="Kafka bootstrap servers"
+    )
+    produce_events_p.add_argument(
+        "--topic", default=None, help="Topic (default ticketing.bookings)"
+    )
+    produce_events_p.set_defaults(func=cmd_produce_events)
 
-    consume = sub.add_parser("consume", help="Land stream events into bronze.events_raw")
-    consume.add_argument(
-        "topic",
-        nargs="?",
-        default="events",
-        help="Topic to consume (default: events)",
+    consume = sub.add_parser("consume", help="Consume a stream into bronze")
+    consume_sub = consume.add_subparsers(dest="source", required=True)
+    consume_events_p = consume_sub.add_parser(
+        "events",
+        help="ticketing.bookings → bronze.events_raw (manual offset commit)",
     )
-    consume.add_argument(
+    consume_events_p.add_argument(
+        "--bootstrap", default=None, help="Kafka bootstrap servers"
+    )
+    consume_events_p.add_argument(
+        "--topic", default=None, help="Topic (default ticketing.bookings)"
+    )
+    consume_events_p.add_argument("--group", default=None, help="Consumer group id")
+    consume_events_p.add_argument(
+        "--max-messages",
+        type=int,
+        default=100,
+        help="Max messages to poll in one run",
+    )
+    consume_events_p.add_argument(
+        "--idle-timeout",
+        type=float,
+        default=5.0,
+        help="Stop polling after this many idle seconds",
+    )
+    consume_events_p.add_argument(
         "--delay-ms",
         type=int,
         default=0,
-        help="Sleep between messages — makes a mid-stream SIGKILL catchable",
+        help="Sleep after each message — makes a mid-stream SIGKILL catchable (VDE-21)",
     )
-    consume.add_argument(
+    consume_events_p.add_argument(
         "--commit-delay-ms",
         type=int,
         default=0,
         help="Sleep between bronze write and offset commit (redelivery danger window)",
     )
-    consume.add_argument(
-        "--idle-seconds",
-        type=float,
-        default=1.0,
-        help="Exit after this many seconds with no messages (default: 1)",
-    )
-    consume.add_argument(
+    consume_events_p.add_argument(
         "--forever",
         action="store_true",
-        help="Do not exit on idle — run until killed",
+        help="Do not exit on idle / max-messages — run until killed (VDE-21)",
     )
-    consume.add_argument(
+    consume_events_p.add_argument(
         "--skip-schema",
         action="store_true",
-        help="Do not bootstrap bronze.events_raw DDL before consuming",
+        help="Do not bootstrap events_raw DDL before consuming",
     )
-    consume.set_defaults(func=cmd_consume)
+    consume_events_p.set_defaults(func=cmd_consume_events)
+
     return parser
 
 
