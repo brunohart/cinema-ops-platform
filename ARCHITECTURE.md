@@ -3,7 +3,7 @@
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
 **Last revised:** 2026-07-31
-**Revision count:** 4
+**Revision count:** 5
 
 ---
 
@@ -71,6 +71,7 @@ rewritten in section 7.
 | 2 | landing files | schema drift | upstream renames, reorders or reformats a column and has no obligation to tell me | Pydantic model validated at ingest; rejected rows counted and written to `bronze.quarantine` with `raw_payload` retained | quarantine the bad row, land the good ones; one malformed row must not block the batch (ADR-011) | `PREDICTED` |
 | 3 | `cinema_ops` | late-arriving transactions | a row's business timestamp precedes its commit time; a high-watermark read steps past it permanently | row count in the overlap band per run; reconciliation against source count for a closed period | overlap window on every incremental read + idempotent dedupe on natural key | `PREDICTED` |
 | 4 | ticketing events | duplicate delivery | at-least-once delivery semantics; redelivery on consumer restart or partition replay | duplicate rate on event key, logged per run | idempotent merge on event id — processing the same event *n* times yields the same state as once | `PREDICTED` |
+| 4b | ticketing events | unparseable / invalid payload | producer bug, partial write, or schema drift on a JSON event | DLQ publish count; consumer continues past the poison offset | produce ORIGINAL bytes to `ticketing.bookings.dlq` with reason/source headers, then commit (ADR-012) — same principle as `bronze.quarantine`, different substrate | `PREDICTED` |
 
 ### 2b. Known-but-unmitigated
 
