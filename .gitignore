@@ -19,6 +19,11 @@ storage/
 logs/
 compute_logs/
 
+# promptfoo local artefacts (VDE-48)
+.promptfoo/
+evals/output/
+promptfoo-*.json
+
 # dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/
 dbt/logs/
