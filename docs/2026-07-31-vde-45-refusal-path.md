@@ -57,10 +57,22 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "localhost:8787/tools/get_site_performance?siteIds=9" | jq
 ```
 
-Observed: `refused: true`, `code: site_scope`, suggestion to retry within
-scope — and **no `rows` key**. Mixed `siteIds=1,9` also refuses (no partial
-result presented as complete). In-scope `siteIds=1` returns rows with
-`refused: false`.
+Observed (`./scripts/prove_refusal.sh`, exit 0):
+
+```json
+{
+  "refused": true,
+  "reason": "Token is scoped to sites 1-3; site 9 was requested.",
+  "suggestion": "Retry with siteIds within scope.",
+  "code": "site_scope",
+  "token_label": "proof-refusal-1-3"
+}
+```
+
+No `rows` key. Mixed `siteIds=1,9` also refuses (no partial result presented
+as complete). In-scope `siteIds=1` returns rows with `refused: false`.
+Disallowed tool, bad `siteIds=abc`, and `from=2000-01-01` each refuse with
+their own `code` / actionable `suggestion`.
 
 ## Trail
 
