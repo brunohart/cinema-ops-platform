@@ -342,6 +342,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold star schema — dims with surrogates, facts with keys + measures only; zero orphan `film_key` | `./scripts/prove-gold.sh` | [recorded](docs/2026-07-31-vde-25-gold-proof.md) — `PASS=35`, orphans `0` |
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
+| append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -453,7 +454,8 @@ src/
 workspace.yaml             dagster dev code location → orchestration.definitions
 
 sql/
-  init/001_schemas.sql     bronze · silver · gold
+  init/001_schemas.sql     bronze · silver · gold · meta
+  meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
   bronze/001_quarantine.sql     raw_payload is the point
