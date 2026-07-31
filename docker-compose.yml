@@ -1,4 +1,4 @@
-# Local Postgres + Redpanda for bronze / stream proof commands.
+# Local Postgres + Redpanda for bronze / quarantine / streaming proof commands.
 services:
   db:
     image: postgres:16-alpine
@@ -51,7 +51,8 @@ services:
       timeout: 5s
       retries: 30
 
-  # Create ticketing.bookings once Redpanda is healthy (VDE-18 proof prelude).
+  # Create ticketing.bookings + its dead-letter topic once Redpanda is healthy
+  # (VDE-18 proof prelude; VDE-19 DLQ).
   redpanda-init:
     image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
     depends_on:
@@ -63,7 +64,9 @@ services:
       - -c
       - |
         for i in 1 2 3 4 5 6 7 8 9 10; do
-          rpk topic create ticketing.bookings -p 3 -r 1 --brokers localhost:9092 && break
+          rpk topic create ticketing.bookings -p 3 -r 1 --brokers localhost:9092 \
+            && rpk topic create ticketing.bookings.dlq -p 1 -r 1 --brokers localhost:9092 \
+            && break
           sleep 2
         done
         rpk topic list --brokers localhost:9092

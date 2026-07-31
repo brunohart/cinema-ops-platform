@@ -36,6 +36,7 @@ from extractors.events import (  # noqa: E402
     DEFAULT_BOOTSTRAP,
     DEFAULT_GROUP_ID,
     DEFAULT_TOPIC,
+    DLQ_TOPIC,
     consume_events,
     produce_events,
 )
@@ -238,13 +239,15 @@ def cmd_consume_events(args: argparse.Namespace) -> int:
             idle_timeout_seconds=None if args.forever else args.idle_timeout,
             delay_seconds=args.delay_ms / 1000.0,
             commit_delay_seconds=args.commit_delay_ms / 1000.0,
+            dlq_topic=args.dlq,
         )
     except KeyboardInterrupt:
         print("interrupted", flush=True)
         return 130
     print(
         f"source=ticketing fetched={result.fetched} merged={result.merged} "
-        f"quarantined={result.quarantined} committed={result.committed} "
+        f"quarantined={result.quarantined} dead_lettered={result.dead_lettered} "
+        f"committed={result.committed} "
         f"duplicates={result.duplicates} batch_id={result.batch_id}"
     )
     return 0
@@ -363,6 +366,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--skip-schema",
         action="store_true",
         help="Do not bootstrap events_raw DDL before consuming",
+    )
+    consume_events_p.add_argument(
+        "--dlq",
+        nargs="?",
+        const=DLQ_TOPIC,
+        default=None,
+        metavar="TOPIC",
+        help=(
+            "Dead-letter poison messages to TOPIC as their original bytes "
+            f"(default {DLQ_TOPIC}) instead of bronze.quarantine (VDE-19)"
+        ),
     )
     consume_events_p.set_defaults(func=cmd_consume_events)
 

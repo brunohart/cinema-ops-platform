@@ -1,16 +1,27 @@
-"""Ticketing stream — synthetic producer (VDE-18) + offset-after-write consumer (VDE-20).
+"""Ticketing stream — synthetic producer (VDE-18), offset-after-write consumer
+(VDE-20), kill-window instrumentation (VDE-21) and a dead-letter topic (VDE-19).
 
 Model 01 — tables and streams are the same thing.
 Model 02 — Exactly-once does not exist. Effectively-once does.
+Model 10 — You contract your way to trust.
 
 Kafka offsets are the watermark: ``enable.auto.commit=False``, and the offset
-moves only after a successful bronze (or quarantine) write.
+moves only after a successful bronze (or quarantine / dead-letter) write.
 
 Commit before processing and a crash loses the message with no error anywhere.
 Commit after and a crash repeats it — visible, and survivable because the bronze
 write merges idempotently on ``_payload_hash`` (ADR-008).
 
 The ordering IS the task. Everything else is plumbing.
+
+A dead-letter topic is the streaming version of Day 1's quarantine table: one
+unparseable message must not stall a partition. When a ``dlq_producer`` is
+configured, a parse or validation failure produces the ORIGINAL bytes to
+``ticketing.bookings.dlq`` with headers recording the reason, source topic,
+partition and offset — then commits (ADR-012). Headers, not a wrapper: the DLQ
+payload must stay replayable through this consumer after a fix. With no
+producer configured the failure lands in ``bronze.quarantine`` instead, which
+is the batch-substrate behaviour VDE-18/VDE-21 prove against.
 
 Producer (VDE-18) emits booking events with:
   - deterministic ``event_id`` (seed + sequence)
@@ -26,7 +37,7 @@ import logging
 import random
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol, runtime_checkable
@@ -43,6 +54,9 @@ logger = logging.getLogger(__name__)
 
 SOURCE_NAME = "ticketing"
 DEFAULT_TOPIC = "ticketing.bookings"
+# VDE-19 spells the source topic out alongside its dead-letter companion.
+BOOKINGS_TOPIC = DEFAULT_TOPIC
+DLQ_TOPIC = "ticketing.bookings.dlq"
 DEFAULT_BOOTSTRAP = "localhost:19092"
 DEFAULT_GROUP_ID = "cinema-ops-events"
 DEFAULT_MALFORMED_RATE = 0.05
@@ -51,9 +65,16 @@ CINEMAS = ("SYL", "QTN", "BRK", "PAD")
 CHANNELS = ("web", "kiosk", "app", "box_office")
 SEAT_ROWS = "ABCDEFGH"
 
+# Header keys on DLQ records. The value stays the original payload bytes so a
+# replay of the DLQ topic is a replay of the source messages.
+DLQ_HEADER_REASON = "reason"
+DLQ_HEADER_SOURCE_TOPIC = "source_topic"
+DLQ_HEADER_PARTITION = "source_partition"
+DLQ_HEADER_OFFSET = "source_offset"
+
 
 # ---------------------------------------------------------------------------
-# VDE-20 — protocol consumer + EventExtractor (validate → merge → commit)
+# VDE-20 / VDE-19 — protocol consumer, DLQ producer, EventExtractor
 # ---------------------------------------------------------------------------
 
 
@@ -63,6 +84,15 @@ class ConsumerMessage(Protocol):
 
     @property
     def value(self) -> Any: ...
+
+    @property
+    def topic(self) -> str: ...
+
+    @property
+    def partition(self) -> int: ...
+
+    @property
+    def offset(self) -> int: ...
 
 
 @runtime_checkable
@@ -74,11 +104,27 @@ class EventConsumer(Protocol):
     def commit(self, msg: ConsumerMessage) -> None: ...
 
 
+@runtime_checkable
+class DeadLetterProducer(Protocol):
+    """Produce original message bytes to the DLQ topic. No wrapper object."""
+
+    def produce(
+        self,
+        *,
+        topic: str,
+        value: bytes,
+        headers: Sequence[tuple[str, bytes]],
+    ) -> None: ...
+
+    def flush(self) -> None: ...
+
+
 @dataclass(frozen=True)
 class ConsumeStats:
     processed: int = 0
     merged: int = 0
     quarantined: int = 0
+    dead_lettered: int = 0
     committed: int = 0
     duplicates: int = 0
 
@@ -88,7 +134,7 @@ class SimpleMessage:
     """In-memory message for tests and local fixtures."""
 
     value: Any
-    topic: str = "ticketing"
+    topic: str = BOOKINGS_TOPIC
     partition: int = 0
     offset: int = 0
 
@@ -107,11 +153,83 @@ class InMemoryConsumer:
         self.commits.append(msg)
 
 
+@dataclass
+class DeadLetterRecord:
+    topic: str
+    value: bytes
+    headers: dict[str, str]
+
+
+@dataclass
+class InMemoryDeadLetterProducer:
+    """Test double: records DLQ produces; payload stays raw bytes."""
+
+    records: list[DeadLetterRecord] = field(default_factory=list)
+    flush_calls: int = 0
+
+    def produce(
+        self,
+        *,
+        topic: str,
+        value: bytes,
+        headers: Sequence[tuple[str, bytes]],
+    ) -> None:
+        decoded = {
+            key: val.decode("utf-8") if isinstance(val, (bytes, bytearray)) else str(val)
+            for key, val in headers
+        }
+        self.records.append(DeadLetterRecord(topic=topic, value=bytes(value), headers=decoded))
+
+    def flush(self) -> None:
+        self.flush_calls += 1
+
+
+def _field(msg: Any, name: str) -> Any:
+    """Read a message field whether it is an attribute or a zero-arg method.
+
+    ``confluent_kafka.Message`` exposes ``topic`` / ``partition`` / ``offset`` /
+    ``value`` as methods; in-memory fixtures use plain attributes. Both must work.
+    """
+    val = getattr(msg, name, None)
+    return val() if callable(val) else val
+
+
+def original_bytes(value: Any) -> bytes:
+    """Return the bytes that should land on the DLQ — never a wrapper object."""
+    if value is None:
+        return b""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    # In-memory fixtures may pass a dict; serialise without wrapping.
+    return json.dumps(value, sort_keys=True, default=str).encode("utf-8")
+
+
+def dlq_headers(
+    *,
+    reason: str,
+    source_topic: str,
+    partition: int,
+    offset: int,
+) -> list[tuple[str, bytes]]:
+    """Metadata as headers so the DLQ value remains the original payload."""
+    return [
+        (DLQ_HEADER_REASON, reason.encode("utf-8")),
+        (DLQ_HEADER_SOURCE_TOPIC, source_topic.encode("utf-8")),
+        (DLQ_HEADER_PARTITION, str(partition).encode("utf-8")),
+        (DLQ_HEADER_OFFSET, str(offset).encode("utf-8")),
+    ]
+
+
 class EventExtractor:
     """Consume ticketing events into bronze with at-least-once offset handling.
 
     Auto-commit is never used. The consumer group offset advances only after a
-    successful validate → merge (or quarantine) for that message.
+    successful validate → merge for that message, or after the failure has been
+    recorded somewhere durable — the DLQ topic when a ``dlq_producer`` is
+    configured (VDE-19), otherwise ``bronze.quarantine``. Either way one poison
+    message cannot stall the partition.
     """
 
     def __init__(
@@ -120,8 +238,10 @@ class EventExtractor:
         consumer: EventConsumer,
         bronze_store: BronzeStore,
         quarantine_store: QuarantineStore,
+        dlq_producer: DeadLetterProducer | None = None,
         validator: RowValidator | None = None,
         source: str = SOURCE_NAME,
+        dlq_topic: str = DLQ_TOPIC,
         clock: Callable[[], datetime] | None = None,
         batch_id_factory: Callable[[], str] | None = None,
         delay_seconds: float = 0.0,
@@ -131,8 +251,10 @@ class EventExtractor:
         self.consumer = consumer
         self.bronze_store = bronze_store
         self.quarantine_store = quarantine_store
+        self.dlq_producer = dlq_producer
         self.validator: RowValidator = validator or DefaultRowValidator()
         self.source = source
+        self.dlq_topic = dlq_topic
         self._clock = clock or (lambda: datetime.now(UTC))
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
         self.delay_seconds = delay_seconds
@@ -144,19 +266,40 @@ class EventExtractor:
     def consume(self, *, max_messages: int | None = None) -> ConsumeStats:
         """Drain the consumer (or up to ``max_messages``).
 
-        Ordering is load-bearing — do not reorder the three steps in the loop.
+        Ordering is load-bearing — do not reorder the steps in the loop. Every
+        path writes somewhere durable (bronze, DLQ, or quarantine) and only then
+        commits the offset.
         """
         processed = 0
         merged = 0
         quarantined = 0
+        dead_lettered = 0
         committed = 0
         duplicates = 0
         batch_id = self._batch_id_factory()
 
         # The ordering IS the task. Everything else is plumbing.
         for msg in self.consumer:
-            row = self.validate(msg, batch_id=batch_id)  # 1. parse
-            merged_n, quarantined_n = self.merge_to_bronze(row)  # 2. write, idempotent
+            value = _field(msg, "value")
+            row, parse_error = self._try_parse_value(value, batch_id=batch_id)  # 1. parse
+
+            merged_n = 0
+            quarantined_n = 0
+            dead_lettered_n = 0
+
+            if parse_error is not None:
+                dead_lettered_n, quarantined_n = self._reject(msg, row, reason=parse_error)
+            else:
+                assert row is not None
+                ok, error = self.validator.validate(row)
+                if not ok:
+                    dead_lettered_n, quarantined_n = self._reject(
+                        msg, row, reason=error or "validation failed"
+                    )
+                else:
+                    # 2. write, idempotent on _payload_hash
+                    merged_n = self.bronze_store.merge([row], key=BRONZE_MERGE_KEY)
+
             if self.commit_delay_seconds > 0:
                 self._sleep(self.commit_delay_seconds)
             self.consumer.commit(msg)  # 3. only now
@@ -164,15 +307,17 @@ class EventExtractor:
             processed += 1
             merged += merged_n
             quarantined += quarantined_n
+            dead_lettered += dead_lettered_n
             committed += 1
-            if quarantined_n == 0 and merged_n == 0:
+            if merged_n == 0 and quarantined_n == 0 and dead_lettered_n == 0:
                 duplicates += 1
             if self.delay_seconds > 0:
                 self._sleep(self.delay_seconds)
             if processed % 50 == 0 or processed == 1:
                 print(
                     f"progress polled={processed} merged={merged} "
-                    f"duplicates={duplicates} quarantined={quarantined}",
+                    f"duplicates={duplicates} quarantined={quarantined} "
+                    f"dead_lettered={dead_lettered}",
                     flush=True,
                 )
 
@@ -183,17 +328,81 @@ class EventExtractor:
             processed=processed,
             merged=merged,
             quarantined=quarantined,
+            dead_lettered=dead_lettered,
             committed=committed,
             duplicates=duplicates,
         )
 
+    def _reject(
+        self,
+        msg: ConsumerMessage,
+        row: dict[str, Any] | None,
+        *,
+        reason: str,
+    ) -> tuple[int, int]:
+        """Record a failure durably. Returns ``(dead_lettered, quarantined)``.
+
+        DLQ when a producer is configured — the original bytes stay replayable.
+        Otherwise ``bronze.quarantine``, which keeps the same evidence in the
+        batch substrate (ADR-011).
+        """
+        if self.dlq_producer is not None:
+            self.dead_letter(msg, original_bytes(_field(msg, "value")), reason=reason)
+            return 1, 0
+
+        payload = row if row is not None else {"_parse_error": reason}
+        quarantined = dict(payload)
+        quarantined["_quarantine_reason"] = reason
+        self.quarantine_store.write([quarantined])
+        return 0, 1
+
+    def dead_letter(self, msg: ConsumerMessage, raw: bytes, *, reason: str) -> None:
+        """Produce ORIGINAL bytes to the DLQ with reason/source headers, then flush."""
+        if self.dlq_producer is None:
+            raise RuntimeError("dead_letter() called without a dlq_producer")
+
+        topic = str(_field(msg, "topic") or BOOKINGS_TOPIC)
+        partition = int(_field(msg, "partition") or 0)
+        offset = int(_field(msg, "offset") or 0)
+        headers = dlq_headers(
+            reason=reason,
+            source_topic=topic,
+            partition=partition,
+            offset=offset,
+        )
+        self.dlq_producer.produce(topic=self.dlq_topic, value=raw, headers=headers)
+        self.dlq_producer.flush()
+        logger.warning(
+            "dead-lettered message topic=%s partition=%s offset=%s reason=%s",
+            topic,
+            partition,
+            offset,
+            reason,
+        )
+
     def validate(self, msg: ConsumerMessage, *, batch_id: str) -> dict[str, Any]:
-        """Parse the message value into a stamped bronze row (or a reject)."""
-        payload = self._parse_value(msg.value)
-        return self._stamp(payload, batch_id=batch_id)
+        """Parse the message value into a stamped bronze row (or a stamped reject)."""
+        value = _field(msg, "value")
+        row, error = self._try_parse_value(value, batch_id=batch_id)
+        if error is not None:
+            # A stamped reject keeps ``MalformedEventValidator`` able to see the
+            # parse error for callers that validate after this helper.
+            return self._stamp(
+                {
+                    "_parse_error": error,
+                    "_raw": original_bytes(value).decode("utf-8", errors="replace"),
+                },
+                batch_id=batch_id,
+            )
+        assert row is not None
+        return row
 
     def merge_to_bronze(self, row: dict[str, Any]) -> tuple[int, int]:
-        """Idempotent bronze write. Invalid rows quarantine; both paths return."""
+        """Idempotent bronze write. Invalid rows quarantine; both paths return.
+
+        Kept for the commit-ordering proofs that exercise merge in isolation;
+        the consume loop routes stream poison through ``_reject`` instead.
+        """
         ok, error = self.validator.validate(row)
         if not ok:
             quarantined = dict(row)
@@ -204,22 +413,37 @@ class EventExtractor:
         written = self.bronze_store.merge([row], key=BRONZE_MERGE_KEY)
         return written, 0
 
-    def _parse_value(self, value: Any) -> dict[str, Any]:
+    def _try_parse_value(
+        self,
+        value: Any,
+        *,
+        batch_id: str,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        payload, error = self._parse_value(value)
+        if error is not None:
+            return None, error
+        assert payload is not None
+        return self._stamp(payload, batch_id=batch_id), None
+
+    def _parse_value(self, value: Any) -> tuple[dict[str, Any] | None, str | None]:
         if value is None:
-            return {"_parse_error": "empty message value"}
+            return None, "empty message value"
         if isinstance(value, dict):
-            return value
+            return value, None
         if isinstance(value, (bytes, bytearray)):
-            text = bytes(value).decode("utf-8")
+            try:
+                text = bytes(value).decode("utf-8")
+            except UnicodeDecodeError as exc:
+                return None, f"invalid utf-8: {exc}"
         else:
             text = str(value)
         try:
             parsed = json.loads(text)
         except (TypeError, ValueError) as exc:
-            return {"_parse_error": f"invalid json: {exc}", "_raw": text}
+            return None, f"invalid json: {exc}"
         if not isinstance(parsed, dict):
-            return {"_parse_error": "json payload is not an object", "_raw": parsed}
-        return parsed
+            return None, "json payload is not an object"
+        return parsed, None
 
     def _stamp(self, payload: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
         """Bronze audit columns — same contract as ``BaseExtractor.stamp``."""
@@ -253,6 +477,7 @@ class ConsumeResult:
     batch_id: str
     committed: int
     duplicates: int = 0
+    dead_lettered: int = 0
 
 
 def _iso(dt: datetime) -> str:
@@ -533,6 +758,40 @@ class ConfluentEventConsumer:
             self._consumer.close()
 
 
+class ConfluentDeadLetterProducer:
+    """Real DLQ producer (VDE-19). Value stays the original message bytes."""
+
+    def __init__(
+        self,
+        *,
+        bootstrap: str = DEFAULT_BOOTSTRAP,
+        producer: Any | None = None,
+    ) -> None:
+        if producer is None:
+            from confluent_kafka import Producer
+
+            producer = Producer(
+                {
+                    "bootstrap.servers": bootstrap,
+                    "client.id": "cinema-ops-dlq-producer",
+                    "acks": "all",
+                }
+            )
+        self._producer = producer
+
+    def produce(
+        self,
+        *,
+        topic: str,
+        value: bytes,
+        headers: Sequence[tuple[str, bytes]],
+    ) -> None:
+        self._producer.produce(topic, value=value, headers=list(headers))
+
+    def flush(self) -> None:
+        self._producer.flush(30)
+
+
 def consume_events(
     *,
     dsn: str,
@@ -544,8 +803,14 @@ def consume_events(
     delay_seconds: float = 0.0,
     commit_delay_seconds: float = 0.0,
     quarantine_store: Any = None,
+    dlq_topic: str | None = None,
 ) -> ConsumeResult:
-    """Run one consume cycle via EventExtractor + ConfluentEventConsumer."""
+    """Run one consume cycle via EventExtractor + ConfluentEventConsumer.
+
+    ``dlq_topic`` opts into the VDE-19 dead-letter path: poison messages are
+    republished there as their original bytes instead of landing in
+    ``bronze.quarantine``.
+    """
     from stores.postgres import DsnQuarantineStore
 
     batch_id = str(uuid.uuid4())
@@ -556,11 +821,16 @@ def consume_events(
         max_messages=max_messages,
         idle_timeout_seconds=idle_timeout_seconds,
     )
+    dlq_producer = (
+        ConfluentDeadLetterProducer(bootstrap=bootstrap) if dlq_topic is not None else None
+    )
     try:
         extractor = EventExtractor(
             consumer=consumer,
             bronze_store=EventsBronzeStore(dsn),
             quarantine_store=quarantine_store or DsnQuarantineStore(dsn),
+            dlq_producer=dlq_producer,
+            dlq_topic=dlq_topic or DLQ_TOPIC,
             validator=MalformedEventValidator(),
             batch_id_factory=lambda: batch_id,
             delay_seconds=delay_seconds,
@@ -574,6 +844,7 @@ def consume_events(
             batch_id=batch_id,
             committed=stats.committed,
             duplicates=stats.duplicates,
+            dead_lettered=stats.dead_lettered,
         )
     finally:
         consumer.close()

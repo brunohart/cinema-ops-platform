@@ -351,3 +351,37 @@ and whole-file rejection is the honest response. Or a regulatory path that forbi
 a declared batch under any circumstance.
 
 ---
+
+## ADR-012 — Streaming dead-letter topic for unparseable events
+
+**Status** Accepted · 2026-07-31 · companion to ADR-011 for the Redpanda substrate
+
+**Context** The ticketing consumer reads a continuous partition. Raising on a single malformed JSON
+payload stalls every later event on that partition — silent lag growth, not a loud failure. Dropping
+the message loses the only evidence of what the producer emitted. ADR-011 already chose quarantine
+for batch rows; the stream needs the same principle on a topic.
+
+**Decision** On parse or validation failure, produce the **original message bytes** to
+`ticketing.bookings.dlq` with Kafka headers recording `reason`, `source_topic`, `source_partition`,
+and `source_offset`, then commit the source offset. Headers, not a wrapper object: a wrapper would
+make the DLQ payload no longer the payload, and the point of a DLQ is that you can replay it back
+through the consumer after a fix.
+
+**Consequences** The partition advances past poison. Completeness for the stream is measured over
+accepted events; DLQ volume is a first-class signal and must be monitored. Replay is a deliberate
+operation against the DLQ topic, not automatic redrive. The compose stack creates the DLQ topic
+alongside `ticketing.bookings`.
+
+The DLQ is opt-in per consumer (`--dlq`, `consume_events(dlq_topic=...)`). With no dead-letter
+producer configured the same failure lands in `bronze.quarantine` instead, which is what the VDE-18
+and VDE-21 proofs assert against. Two substrates for one rule — the failure is always recorded
+somewhere durable before the offset moves — and the caller chooses which. That is deliberate: the
+DLQ buys replay, and a consumer that cannot replay should not be paying for a second copy of the
+evidence.
+
+**What would change my mind** A poison message that implies the whole partition is corrupt (wrong
+codec for the topic, not a single bad event) — there advancing past it would hide a systemic
+failure. Or a regulatory path that forbids acknowledging an event before it is durably landable in
+bronze under any circumstance.
+
+---
