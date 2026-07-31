@@ -1,8 +1,18 @@
-"""CLI entrypoint — ``python -m src.cli extract files``."""
+"""CLI entrypoints for cinema-ops-platform extractors.
+
+Proofs:
+
+    python -m src.cli extract files
+    psql $DB -c "select reason, count(*) from bronze.quarantine group by 1"
+
+    python -m src.cli extract tmdb
+    psql $DB -c "select count(*) from bronze.film_raw"
+"""
 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -14,10 +24,10 @@ if str(_SRC) not in sys.path:
 
 from extractors.files import FileExtractor  # noqa: E402
 from stores.postgres import (  # noqa: E402
-    PostgresBronzeStore,
-    PostgresQuarantineStore,
-    PostgresStateStore,
-    apply_schema,
+    DsnQuarantineStore,
+    LandingBronzeStore,
+    LandingStateStore,
+    apply_schema_files,
     dsn_from_env,
 )
 
@@ -26,23 +36,48 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _load_dotenv() -> None:
+    """Best-effort ``.env`` load without requiring python-dotenv."""
+    path = os.path.join(os.getcwd(), ".env")
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip("'").strip('"')
+            os.environ.setdefault(key, value)
+
+
+def _bootstrap_landing_schema(dsn: str) -> None:
+    """Apply VDE-14 quarantine + VDE-13 landing DDL (idempotent)."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "001_bronze.sql"),
+    )
+
+
 def cmd_extract_files(args: argparse.Namespace) -> int:
+    _load_dotenv()
     dsn = dsn_from_env()
     landing = Path(args.landing)
     if not landing.is_absolute():
         landing = _repo_root() / landing
 
-    # Idempotent DDL — keeps the issue proof (`python -m src.cli extract files`)
-    # working on a fresh database without a separate migrate step.
     if not args.skip_schema:
-        schema_path = _repo_root() / "sql" / "001_bronze.sql"
-        apply_schema(dsn, schema_path.read_text(encoding="utf-8"))
+        _bootstrap_landing_schema(dsn)
 
     extractor = FileExtractor(
         landing_dir=landing,
-        state_store=PostgresStateStore(dsn),
-        bronze_store=PostgresBronzeStore(dsn),
-        quarantine_store=PostgresQuarantineStore(dsn),
+        state_store=LandingStateStore(dsn),
+        bronze_store=LandingBronzeStore(dsn),
+        quarantine_store=DsnQuarantineStore(dsn),
     )
     result = extractor.run()
     print(
@@ -53,11 +88,40 @@ def cmd_extract_files(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_extract_tmdb(_args: argparse.Namespace) -> int:
+    """Run the TMDB extractor end-to-end.
+
+    Requires ``TMDB_API_KEY`` and a wired bronze/state store (see Day-1 DB issues).
+    Until those land, unit tests in ``tests/extractors/test_tmdb.py`` are the CI proof.
+    """
+    _load_dotenv()
+    api_key = os.environ.get("TMDB_API_KEY", "").strip()
+    if not api_key:
+        print("TMDB_API_KEY is not set (add it to .env)", file=sys.stderr)
+        return 2
+
+    db = os.environ.get("DB") or os.environ.get("DATABASE_URL")
+    if not db:
+        print(
+            "DB / DATABASE_URL is not set — cannot land into bronze.film_raw yet.\n"
+            "CI proof: python -m pytest tests/extractors/test_tmdb.py -q",
+            file=sys.stderr,
+        )
+        return 2
+
+    print(
+        "TMDB extractor is implemented (TMDBExtractor.fetch); "
+        "Postgres store wiring is not in this change set.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="src.cli", description="cinema-ops-platform CLI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    extract = sub.add_parser("extract", help="Run a source extractor")
+    extract = sub.add_parser("extract", help="Run a source extractor into bronze")
     extract_sub = extract.add_subparsers(dest="source", required=True)
 
     files = extract_sub.add_parser("files", help="Glob landing dir; quarantine schema drift")
@@ -69,9 +133,12 @@ def build_parser() -> argparse.ArgumentParser:
     files.add_argument(
         "--skip-schema",
         action="store_true",
-        help="Do not apply sql/001_bronze.sql before extracting",
+        help="Do not bootstrap quarantine/landing DDL before extracting",
     )
     files.set_defaults(func=cmd_extract_files)
+
+    tmdb = extract_sub.add_parser("tmdb", help="Pull TMDB film metadata into bronze")
+    tmdb.set_defaults(func=cmd_extract_tmdb)
     return parser
 
 

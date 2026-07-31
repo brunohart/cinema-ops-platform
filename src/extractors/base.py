@@ -63,6 +63,23 @@ class RowValidator(Protocol):
     def validate(self, row: dict[str, Any]) -> tuple[bool, str | None]: ...
 
 
+@runtime_checkable
+class PipelineRunStore(Protocol):
+    """Append-only run log — proves a run executed even when bronze merges zero rows."""
+
+    def record(
+        self,
+        *,
+        source: str,
+        batch_id: str,
+        fetched: int,
+        merged: int,
+        quarantined: int,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     """Exponential backoff with full jitter around ``fetch()`` only."""
@@ -101,6 +118,8 @@ class BaseExtractor(ABC):
     """Abstract extractor using the template method pattern.
 
     Subclasses implement ``fetch()`` — and only ``fetch()``. ``run()`` is final.
+    Bronze audit columns are applied only via ``stamp()`` on this base class so no
+    subclass can forget them (VDE-10 / CLAUDE.md layer rules).
     """
 
     def __init__(
@@ -110,6 +129,7 @@ class BaseExtractor(ABC):
         state_store: StateStore,
         bronze_store: BronzeStore,
         quarantine_store: QuarantineStore,
+        pipeline_run_store: PipelineRunStore | None = None,
         validator: RowValidator | None = None,
         retry: RetryPolicy | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -121,12 +141,18 @@ class BaseExtractor(ABC):
         self.state_store = state_store
         self.bronze_store = bronze_store
         self.quarantine_store = quarantine_store
+        self.pipeline_run_store = pipeline_run_store
         self.validator: RowValidator = validator or DefaultRowValidator()
         self.retry = retry or RetryPolicy()
         self._sleep = sleep
         self._clock = clock or (lambda: datetime.now(UTC))
         self._rng = rng or random.Random()
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
+
+    @property
+    def source_name(self) -> str:
+        """Canonical source identifier written to ``_source`` on every bronze row."""
+        return self.source
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -142,20 +168,37 @@ class BaseExtractor(ABC):
             new_watermark: value to persist only after a successful bronze write
         """
 
+    def stamp(self, row: dict[str, Any], batch_id: str) -> dict[str, Any]:
+        """Put the bronze audit stamp on a raw payload.
+
+        ``_batch_id`` answers which run wrote the row. ``_payload_hash`` (with
+        ``sort_keys=True``) makes a re-run a merge instead of a duplication —
+        without sorted keys, dict ordering changes the hash and dedup silently
+        stops working.
+        """
+        # Hash the payload alone — not the metadata — so re-stamping the same
+        # record yields the same merge key across runs.
+        payload = json.dumps(row, sort_keys=True, default=str)
+        return {
+            "_payload": row,
+            "_ingested_at": self._clock(),
+            "_source": self.source_name,
+            "_batch_id": batch_id,
+            "_payload_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        }
+
     def run(self) -> ExtractorResult:
         """Concrete template method: watermark → fetch → stamp → validate → merge → watermark.
 
         Order is load-bearing. The new watermark is written last, after a successful
         bronze merge, so a crash mid-run re-fetches rather than skipping data.
         """
+        started_at = self._clock()
         watermark = self.state_store.read_watermark(self.source)
         rows, new_watermark = self._fetch_with_retry(watermark)
 
         batch_id = self._batch_id_factory()
-        ingested_at = self._clock()
-        stamped = [
-            self._stamp_row(row, batch_id=batch_id, ingested_at=ingested_at) for row in rows
-        ]
+        stamped = [self.stamp(row, batch_id) for row in rows]
 
         accepted, rejected = self._partition_by_validation(stamped)
         if rejected:
@@ -167,6 +210,18 @@ class BaseExtractor(ABC):
 
         # Watermark AFTER a successful write, never before.
         self.state_store.write_watermark(self.source, new_watermark)
+
+        finished_at = self._clock()
+        if self.pipeline_run_store is not None:
+            self.pipeline_run_store.record(
+                source=self.source,
+                batch_id=batch_id,
+                fetched=len(rows),
+                merged=merged,
+                quarantined=len(rejected),
+                started_at=started_at,
+                finished_at=finished_at,
+            )
 
         return ExtractorResult(
             fetched=len(rows),
@@ -207,28 +262,6 @@ class BaseExtractor(ABC):
         exp = self.retry.base_delay_seconds * (2 ** (attempt - 1))
         ceiling = min(self.retry.max_delay_seconds, exp)
         return self._rng.uniform(0.0, ceiling)
-
-    def _stamp_row(
-        self,
-        payload: dict[str, Any],
-        *,
-        batch_id: str,
-        ingested_at: datetime,
-    ) -> dict[str, Any]:
-        """Attach the four bronze metadata columns; payload stays unparsed."""
-        payload_hash = self._hash_payload(payload)
-        return {
-            "_payload": payload,
-            "_ingested_at": ingested_at,
-            "_source": self.source,
-            "_batch_id": batch_id,
-            "_payload_hash": payload_hash,
-        }
-
-    @staticmethod
-    def _hash_payload(payload: dict[str, Any]) -> str:
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _partition_by_validation(
         self,

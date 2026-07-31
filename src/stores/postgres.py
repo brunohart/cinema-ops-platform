@@ -1,12 +1,11 @@
-"""Postgres-backed state, bronze, and quarantine stores.
+"""Landing-file bronze + watermark stores (VDE-13).
 
-Bronze writes are INSERT … ON CONFLICT DO NOTHING — idempotent merge without
-UPDATE or DELETE, preserving the append-only rule.
+Quarantine is owned by ``stores.quarantine`` / ``sql/bronze/001_quarantine.sql``
+(VDE-14). This module does not redefine ``bronze.quarantine``.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -14,7 +13,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 
-class PostgresStateStore:
+class LandingStateStore:
     """High-watermark store in ``ops.watermarks`` (not bronze — updates are allowed)."""
 
     def __init__(self, dsn: str) -> None:
@@ -46,7 +45,7 @@ class PostgresStateStore:
             conn.commit()
 
 
-class PostgresBronzeStore:
+class LandingBronzeStore:
     """Append-only bronze landing for accepted landing-file rows."""
 
     def __init__(self, dsn: str, table: str = "bronze.raw_landing_files") -> None:
@@ -80,41 +79,27 @@ class PostgresBronzeStore:
         return written
 
 
-class PostgresQuarantineStore:
-    """Visible landing for rows that fail the Pydantic contract."""
+class DsnQuarantineStore:
+    """Thin DSN wrapper around VDE-14 ``PostgresQuarantineStore`` (connection-based)."""
 
-    def __init__(self, dsn: str, table: str = "bronze.quarantine") -> None:
+    def __init__(self, dsn: str) -> None:
         self.dsn = dsn
-        self.table = table
 
     def write(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
+        # Strip whole-file rejection markers before evidence lands.
+        cleaned: list[dict[str, Any]] = []
+        for row in rows:
+            payload = row.get("_payload")
+            if isinstance(payload, dict):
+                payload = {k: v for k, v in payload.items() if not k.startswith("__")}
+                row = {**row, "_payload": payload}
+            cleaned.append(row)
+        from stores.quarantine import PostgresQuarantineStore
+
         with psycopg.connect(self.dsn) as conn:
-            with conn.cursor() as cur:
-                for row in rows:
-                    reason = row.get("_quarantine_reason") or "schema_drift"
-                    payload = row.get("_payload", {})
-                    # Strip internal markers from the stored payload view.
-                    if isinstance(payload, dict):
-                        payload = {k: v for k, v in payload.items() if not k.startswith("__")}
-                    ingested_at = row.get("_ingested_at") or datetime.now().astimezone()
-                    cur.execute(
-                        f"""
-                        INSERT INTO {self.table}
-                          (reason, _payload, _ingested_at, _source, _batch_id, _payload_hash)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        """,
-                        (
-                            reason,
-                            Jsonb(payload),
-                            ingested_at,
-                            row.get("_source", "unknown"),
-                            row.get("_batch_id", ""),
-                            row.get("_payload_hash", ""),
-                        ),
-                    )
-            conn.commit()
+            PostgresQuarantineStore(conn).write(cleaned)
 
 
 def apply_schema(dsn: str, schema_sql: str) -> None:
@@ -123,6 +108,14 @@ def apply_schema(dsn: str, schema_sql: str) -> None:
         with conn.cursor() as cur:
             cur.execute(schema_sql)
         conn.commit()
+
+
+def apply_schema_files(dsn: str, *paths: str) -> None:
+    """Apply one or more SQL files in order."""
+    from pathlib import Path
+
+    for path in paths:
+        apply_schema(dsn, Path(path).read_text(encoding="utf-8"))
 
 
 def dsn_from_env(env: dict[str, str] | None = None) -> str:
@@ -136,7 +129,6 @@ def dsn_from_env(env: dict[str, str] | None = None) -> str:
             "DB (or DATABASE_URL) must be set — e.g. "
             "postgresql://cinema:cinema@localhost:5432/cinema_ops"
         )
-    # Allow a bare JSON dump of the watermark column without breaking psycopg.
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://") :]
     return dsn
