@@ -357,7 +357,39 @@ def fct_ticket_sale(
     )
 
 
+@asset(
+    key_prefix="gold",
+    description=(
+        "One booking transaction — whatever number of tickets it contained. "
+        "Keys + measures only (ARCHITECTURE §3a / VDE-25). Orphan film_key "
+        "check is C1 (ARCHITECTURE §5c); freshness ≤ 3h with the ticket grain."
+    ),
+    ins={
+        "dim_film": AssetIn(key_prefix="gold"),
+        "stg_cinema_ops": AssetIn(key_prefix="silver"),
+        "stg_ticketing": AssetIn(key_prefix="silver"),
+    },
+)
+def fct_booking(
+    dim_film: None,
+    stg_cinema_ops: None,
+    stg_ticketing: None,
+) -> MaterializeResult:
+    """Lineage declaration for the dbt gold.fct_booking model; checks attach here."""
+    return MaterializeResult(
+        metadata={
+            "upstreams": MetadataValue.text(
+                "gold/dim_film, silver/stg_cinema_ops, silver/stg_ticketing"
+            ),
+            "owner": MetadataValue.text("dbt"),
+            "grain": MetadataValue.text(
+                "one booking transaction, any ticket count"
+            ),
+        }
+    )
+
+
 BRONZE_ASSETS = [raw_tmdb, raw_landing_files, raw_cinema_ops, raw_ticketing]
 SILVER_ASSETS = [stg_films, stg_landing_files, stg_cinema_ops, stg_ticketing]
-GOLD_ASSETS = [dim_film, fct_ticket_sale]
+GOLD_ASSETS = [dim_film, fct_ticket_sale, fct_booking]
 ALL_ASSETS = BRONZE_ASSETS + SILVER_ASSETS + GOLD_ASSETS
