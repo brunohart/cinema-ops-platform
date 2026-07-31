@@ -80,6 +80,7 @@ class ConsumeStats:
     merged: int = 0
     quarantined: int = 0
     committed: int = 0
+    duplicates: int = 0
 
 
 @dataclass
@@ -123,6 +124,9 @@ class EventExtractor:
         source: str = SOURCE_NAME,
         clock: Callable[[], datetime] | None = None,
         batch_id_factory: Callable[[], str] | None = None,
+        delay_seconds: float = 0.0,
+        commit_delay_seconds: float = 0.0,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.consumer = consumer
         self.bronze_store = bronze_store
@@ -131,6 +135,11 @@ class EventExtractor:
         self.source = source
         self._clock = clock or (lambda: datetime.now(UTC))
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
+        self.delay_seconds = delay_seconds
+        # Sleep between bronze write and offset commit — the danger window a
+        # SIGKILL must hit to force at-least-once redelivery (VDE-21).
+        self.commit_delay_seconds = commit_delay_seconds
+        self._sleep = sleep
 
     def consume(self, *, max_messages: int | None = None) -> ConsumeStats:
         """Drain the consumer (or up to ``max_messages``).
@@ -141,18 +150,31 @@ class EventExtractor:
         merged = 0
         quarantined = 0
         committed = 0
+        duplicates = 0
         batch_id = self._batch_id_factory()
 
         # The ordering IS the task. Everything else is plumbing.
         for msg in self.consumer:
             row = self.validate(msg, batch_id=batch_id)  # 1. parse
             merged_n, quarantined_n = self.merge_to_bronze(row)  # 2. write, idempotent
+            if self.commit_delay_seconds > 0:
+                self._sleep(self.commit_delay_seconds)
             self.consumer.commit(msg)  # 3. only now
 
             processed += 1
             merged += merged_n
             quarantined += quarantined_n
             committed += 1
+            if quarantined_n == 0 and merged_n == 0:
+                duplicates += 1
+            if self.delay_seconds > 0:
+                self._sleep(self.delay_seconds)
+            if processed % 50 == 0 or processed == 1:
+                print(
+                    f"progress polled={processed} merged={merged} "
+                    f"duplicates={duplicates} quarantined={quarantined}",
+                    flush=True,
+                )
 
             if max_messages is not None and processed >= max_messages:
                 break
@@ -162,6 +184,7 @@ class EventExtractor:
             merged=merged,
             quarantined=quarantined,
             committed=committed,
+            duplicates=duplicates,
         )
 
     def validate(self, msg: ConsumerMessage, *, batch_id: str) -> dict[str, Any]:
@@ -228,7 +251,8 @@ class ConsumeResult:
     merged: int
     quarantined: int
     batch_id: str
-    committed: bool
+    committed: int
+    duplicates: int = 0
 
 
 def _iso(dt: datetime) -> str:
@@ -353,15 +377,22 @@ class EventsBronzeStore:
         with psycopg.connect(self.dsn) as conn:
             with conn.cursor() as cur:
                 for row in rows:
+                    payload = row["_payload"]
+                    event_id = None
+                    if isinstance(payload, dict):
+                        raw_id = payload.get("event_id")
+                        if raw_id is not None:
+                            event_id = str(raw_id)
                     cur.execute(
                         f"""
                         INSERT INTO {self.table}
-                          (_payload, _ingested_at, _source, _batch_id, _payload_hash)
-                        VALUES (%s, %s, %s, %s, %s)
+                          (event_id, _payload, _ingested_at, _source, _batch_id, _payload_hash)
+                        VALUES (%s, %s, %s, %s, %s, %s)
                         ON CONFLICT (_payload_hash) DO NOTHING
                         """,
                         (
-                            Jsonb(row["_payload"]),
+                            event_id,
+                            Jsonb(payload),
                             row["_ingested_at"],
                             row["_source"],
                             row["_batch_id"],
@@ -426,9 +457,9 @@ class ConfluentEventConsumer:
         bootstrap: str = DEFAULT_BOOTSTRAP,
         topic: str = DEFAULT_TOPIC,
         group_id: str = DEFAULT_GROUP_ID,
-        max_messages: int = 100,
+        max_messages: int | None = 100,
         poll_timeout_seconds: float = 1.0,
-        idle_timeout_seconds: float = 5.0,
+        idle_timeout_seconds: float | None = 5.0,
         consumer: Any | None = None,
     ) -> None:
         from confluent_kafka import Consumer, KafkaError, KafkaException
@@ -457,16 +488,26 @@ class ConfluentEventConsumer:
 
     def __iter__(self) -> Iterator[ConsumerMessage]:
         yielded = 0
-        deadline = time.monotonic() + self.idle_timeout_seconds
+        started = time.monotonic()
         idle_since: float | None = None
 
-        while yielded < self.max_messages and time.monotonic() < deadline:
+        while True:
+            if self.max_messages is not None and yielded >= self.max_messages:
+                break
+            if (
+                self.idle_timeout_seconds is not None
+                and time.monotonic() - started >= self.idle_timeout_seconds
+                and yielded == 0
+            ):
+                # No messages at all within the overall idle budget.
+                break
+
             msg = self._consumer.poll(self.poll_timeout_seconds)
             if msg is None:
-                if yielded:
+                if yielded and self.idle_timeout_seconds is not None:
                     if idle_since is None:
                         idle_since = time.monotonic()
-                    elif time.monotonic() - idle_since >= self.poll_timeout_seconds:
+                    elif time.monotonic() - idle_since >= self.idle_timeout_seconds:
                         break
                 continue
             idle_since = None
@@ -498,8 +539,10 @@ def consume_events(
     bootstrap: str = DEFAULT_BOOTSTRAP,
     topic: str = DEFAULT_TOPIC,
     group_id: str = DEFAULT_GROUP_ID,
-    max_messages: int = 100,
-    idle_timeout_seconds: float = 5.0,
+    max_messages: int | None = 100,
+    idle_timeout_seconds: float | None = 5.0,
+    delay_seconds: float = 0.0,
+    commit_delay_seconds: float = 0.0,
     quarantine_store: Any = None,
 ) -> ConsumeResult:
     """Run one consume cycle via EventExtractor + ConfluentEventConsumer."""
@@ -520,6 +563,8 @@ def consume_events(
             quarantine_store=quarantine_store or DsnQuarantineStore(dsn),
             validator=MalformedEventValidator(),
             batch_id_factory=lambda: batch_id,
+            delay_seconds=delay_seconds,
+            commit_delay_seconds=commit_delay_seconds,
         )
         stats = extractor.consume(max_messages=max_messages)
         return ConsumeResult(
@@ -527,7 +572,8 @@ def consume_events(
             merged=stats.merged,
             quarantined=stats.quarantined,
             batch_id=batch_id,
-            committed=stats.committed > 0,
+            committed=stats.committed,
+            duplicates=stats.duplicates,
         )
     finally:
         consumer.close()

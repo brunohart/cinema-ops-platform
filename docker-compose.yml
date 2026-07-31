@@ -17,6 +17,7 @@ services:
       - ./sql/cinema_ops/001_bookings.sql:/docker-entrypoint-initdb.d/031_cinema_ops.sql:ro
       - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/032_raw_cinema_ops.sql:ro
       - ./sql/bronze/003_events_raw.sql:/docker-entrypoint-initdb.d/033_events_raw.sql:ro
+      - ./sql/bronze/004_events_raw_grants.sql:/docker-entrypoint-initdb.d/034_events_raw_grants.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s

@@ -1,4 +1,4 @@
-"""CLI entrypoints for cinema-ops-platform extractors.
+"""CLI entrypoints for cinema-ops-platform extractors and the event stream.
 
 Proofs:
 
@@ -11,9 +11,11 @@ Proofs:
     python -m src.cli extract database
     psql $DB -c "select * from meta.watermarks"
 
-    python -m src.cli produce events
+    python -m src.cli produce events --count 1000
     python -m src.cli consume events
-    psql $DB -c "select count(*) from bronze.events_raw"
+    # SIGKILL mid-stream, then restart consume — VDE-21
+    psql $DB -c "select count(*) as rows, count(distinct event_id) as unique_ids
+      from bronze.events_raw"
 """
 
 from __future__ import annotations
@@ -87,6 +89,7 @@ def _bootstrap_events_schema(dsn: str) -> None:
         str(root / "sql" / "bronze" / "001_quarantine.sql"),
         str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
         str(root / "sql" / "bronze" / "003_events_raw.sql"),
+        str(root / "sql" / "bronze" / "004_events_raw_grants.sql"),
     )
 
 
@@ -225,18 +228,24 @@ def cmd_consume_events(args: argparse.Namespace) -> int:
     topic = args.topic or _kafka_topic()
     group_id = args.group or _kafka_group()
 
-    result = consume_events(
-        dsn=dsn,
-        bootstrap=bootstrap,
-        topic=topic,
-        group_id=group_id,
-        max_messages=args.max_messages,
-        idle_timeout_seconds=args.idle_timeout,
-    )
+    try:
+        result = consume_events(
+            dsn=dsn,
+            bootstrap=bootstrap,
+            topic=topic,
+            group_id=group_id,
+            max_messages=None if args.forever else args.max_messages,
+            idle_timeout_seconds=None if args.forever else args.idle_timeout,
+            delay_seconds=args.delay_ms / 1000.0,
+            commit_delay_seconds=args.commit_delay_ms / 1000.0,
+        )
+    except KeyboardInterrupt:
+        print("interrupted", flush=True)
+        return 130
     print(
         f"source=ticketing fetched={result.fetched} merged={result.merged} "
         f"quarantined={result.quarantined} committed={result.committed} "
-        f"batch_id={result.batch_id}"
+        f"duplicates={result.duplicates} batch_id={result.batch_id}"
     )
     return 0
 
@@ -332,6 +341,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=5.0,
         help="Stop polling after this many idle seconds",
+    )
+    consume_events_p.add_argument(
+        "--delay-ms",
+        type=int,
+        default=0,
+        help="Sleep after each message — makes a mid-stream SIGKILL catchable (VDE-21)",
+    )
+    consume_events_p.add_argument(
+        "--commit-delay-ms",
+        type=int,
+        default=0,
+        help="Sleep between bronze write and offset commit (redelivery danger window)",
+    )
+    consume_events_p.add_argument(
+        "--forever",
+        action="store_true",
+        help="Do not exit on idle / max-messages — run until killed (VDE-21)",
     )
     consume_events_p.add_argument(
         "--skip-schema",
