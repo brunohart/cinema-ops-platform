@@ -305,7 +305,50 @@ def stg_ticketing(raw_ticketing: None) -> MaterializeResult:
 # ---------------------------------------------------------------------------
 # Gold — serving facts/dims named in ARCHITECTURE §3a / §5a.
 # Multiple upstreams as function args → the readable implicit graph.
+# Asset checks (VDE-31) read gold.* and prior materialisation row_count.
 # ---------------------------------------------------------------------------
+
+
+def _bootstrap_gold_sla(dsn: str) -> None:
+    """Grain tables + §5c columns/dims the asset checks join against."""
+    from stores.postgres import apply_schema_files
+
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "gold" / "001_fact_grains.sql"),
+        str(root / "sql" / "gold" / "002_sla_check_columns.sql"),
+    )
+
+
+def _gold_row_count(dsn: str, table: str) -> int:
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM gold.{table}")  # noqa: S608 — caller allow-lists
+        return int(cur.fetchone()[0])
+
+
+def _gold_materialize(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    *,
+    table: str,
+    extra_metadata: dict[str, Any] | None = None,
+) -> MaterializeResult:
+    dsn = pipeline_config.dsn()
+    if not pipeline_config.skip_schema:
+        _bootstrap_gold_sla(dsn)
+    row_count = _gold_row_count(dsn, table)
+    meta: dict[str, Any] = {
+        "row_count": MetadataValue.int(row_count),
+        "owner": MetadataValue.text("dbt"),
+        "gold_table": MetadataValue.text(f"gold.{table}"),
+    }
+    if extra_metadata:
+        meta.update(extra_metadata)
+    context.log.info("gold/%s row_count=%s", table, row_count)
+    return MaterializeResult(metadata=meta)
 
 
 @asset(
@@ -316,13 +359,56 @@ def stg_ticketing(raw_ticketing: None) -> MaterializeResult:
     ),
     ins={"stg_films": AssetIn(key_prefix="silver")},
 )
-def dim_film(stg_films: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("silver/stg_films"),
-            "owner": MetadataValue.text("dbt"),
-        }
+def dim_film(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    stg_films: None,
+) -> MaterializeResult:
+    return _gold_materialize(
+        context,
+        pipeline_config,
+        table="dim_film",
+        extra_metadata={"upstream": MetadataValue.text("silver/stg_films")},
     )
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One cinema site. Conformed exhibition location dimension "
+        "(ARCHITECTURE §3a dim_cinema)."
+    ),
+    ins={
+        "stg_cinema_ops": AssetIn(key_prefix="silver"),
+        "stg_landing_files": AssetIn(key_prefix="silver"),
+    },
+)
+def dim_cinema(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    stg_cinema_ops: None,
+    stg_landing_files: None,
+) -> MaterializeResult:
+    return _gold_materialize(
+        context,
+        pipeline_config,
+        table="dim_cinema",
+        extra_metadata={
+            "upstreams": MetadataValue.text(
+                "silver/stg_cinema_ops, silver/stg_landing_files"
+            ),
+        },
+    )
+
+
+@asset(
+    key_prefix="gold",
+    description="One calendar date (ARCHITECTURE §3a dim_date).",
+)
+def dim_date(
+    context: AssetExecutionContext, pipeline_config: PipelineConfig
+) -> MaterializeResult:
+    return _gold_materialize(context, pipeline_config, table="dim_date")
 
 
 @asset(
@@ -331,33 +417,112 @@ def dim_film(stg_films: None) -> MaterializeResult:
         "One ticket sold — one seat, one showtime, one transaction line. Headline "
         "freshness promise ≤ 3h behind source (ARCHITECTURE §5a). Depends on "
         "ticketing events, cinema_ops bookings, and film attributes via function "
-        "arguments."
+        "arguments. Asset checks: row-count Δ, §5c C2 null-rate, §5c C1 RI."
     ),
     ins={
         "stg_ticketing": AssetIn(key_prefix="silver"),
         "stg_cinema_ops": AssetIn(key_prefix="silver"),
         "stg_films": AssetIn(key_prefix="silver"),
         "stg_landing_files": AssetIn(key_prefix="silver"),
+        "dim_film": AssetIn(key_prefix="gold"),
+        "dim_cinema": AssetIn(key_prefix="gold"),
+        "dim_date": AssetIn(key_prefix="gold"),
     },
 )
 def fct_ticket_sale(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
     stg_ticketing: None,
     stg_cinema_ops: None,
     stg_films: None,
     stg_landing_files: None,
+    dim_film: None,
+    dim_cinema: None,
+    dim_date: None,
 ) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
+    return _gold_materialize(
+        context,
+        pipeline_config,
+        table="fct_ticket_sale",
+        extra_metadata={
             "upstreams": MetadataValue.text(
                 "silver/stg_ticketing, silver/stg_cinema_ops, "
-                "silver/stg_films, silver/stg_landing_files"
+                "silver/stg_films, silver/stg_landing_files, "
+                "gold/dim_film, gold/dim_cinema, gold/dim_date"
             ),
-            "owner": MetadataValue.text("dbt"),
-        }
+        },
+    )
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One booking — one transaction, whatever number of tickets it contained "
+        "(ARCHITECTURE §3a). Asset check: row-count Δ (WARN)."
+    ),
+    ins={
+        "stg_ticketing": AssetIn(key_prefix="silver"),
+        "stg_cinema_ops": AssetIn(key_prefix="silver"),
+    },
+)
+def fct_booking(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    stg_ticketing: None,
+    stg_cinema_ops: None,
+) -> MaterializeResult:
+    return _gold_materialize(
+        context,
+        pipeline_config,
+        table="fct_booking",
+        extra_metadata={
+            "upstreams": MetadataValue.text(
+                "silver/stg_ticketing, silver/stg_cinema_ops"
+            ),
+        },
+    )
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One showtime at one screen on one date, with its aggregate outcome "
+        "(ARCHITECTURE §3a fct_showtime_performance). Asset checks: row-count Δ, "
+        "§5c C1 referential integrity."
+    ),
+    ins={
+        "stg_landing_files": AssetIn(key_prefix="silver"),
+        "stg_ticketing": AssetIn(key_prefix="silver"),
+        "dim_film": AssetIn(key_prefix="gold"),
+        "dim_cinema": AssetIn(key_prefix="gold"),
+        "dim_date": AssetIn(key_prefix="gold"),
+    },
+)
+def fct_showtime_performance(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    stg_landing_files: None,
+    stg_ticketing: None,
+    dim_film: None,
+    dim_cinema: None,
+    dim_date: None,
+) -> MaterializeResult:
+    return _gold_materialize(
+        context,
+        pipeline_config,
+        table="fct_showtime_performance",
+        extra_metadata={
+            "upstreams": MetadataValue.text(
+                "silver/stg_landing_files, silver/stg_ticketing, "
+                "gold/dim_film, gold/dim_cinema, gold/dim_date"
+            ),
+        },
     )
 
 
 BRONZE_ASSETS = [raw_tmdb, raw_landing_files, raw_cinema_ops, raw_ticketing]
 SILVER_ASSETS = [stg_films, stg_landing_files, stg_cinema_ops, stg_ticketing]
-GOLD_ASSETS = [dim_film, fct_ticket_sale]
+GOLD_DIM_ASSETS = [dim_film, dim_cinema, dim_date]
+GOLD_FACT_ASSETS = [fct_ticket_sale, fct_booking, fct_showtime_performance]
+GOLD_ASSETS = GOLD_DIM_ASSETS + GOLD_FACT_ASSETS
 ALL_ASSETS = BRONZE_ASSETS + SILVER_ASSETS + GOLD_ASSETS
