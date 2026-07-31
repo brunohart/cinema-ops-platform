@@ -335,6 +335,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | bronze is append-only in the source tree as well as in the grants | `./scripts/prove-bronze-immutable.sh` | **currently red — see below** |
 | the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
+| four extractors are Dagster assets; lineage edges are function-argument deps | `./scripts/prove_dagster_assets.sh` then `dagster dev -w workspace.yaml` | [recorded](docs/2026-07-31-vde-22-dagster-assets.md) — 10 assets, 9 edges |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -409,10 +410,9 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
-`silver` and `gold` models (dbt) · Dagster assets and the SLA checks from
-[ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the Redpanda stream
-consumer · the MCP server and its tool set · the evaluation layer, including adversarial
-prompt-injection testing.
+`silver` and `gold` **dbt transforms** (assets are declared; models not yet) · Dagster asset checks /
+SLAs from [ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness) · the MCP
+server and its tool set · the evaluation layer, including adversarial prompt-injection testing.
 
 ---
 
@@ -429,9 +429,12 @@ src/
   extractors/tmdb.py       API shape   — pagination, 429 Retry-After
   extractors/files.py      file shape  — Pydantic contract at the ingest boundary
   extractors/postgres.py   Postgres-backed bronze / watermark / run-log stores
+  orchestration/           Dagster assets — key_prefix bronze/silver/gold, no schedules
   stores/quarantine.py     rejected rows, with the payload kept as evidence
   validation/              schema-drift reasons that group cleanly in a proof query
   models/session.py        extra="forbid" — a silently added column becomes a loud failure
+
+workspace.yaml             dagster dev code location → orchestration.definitions
 
 sql/
   init/001_schemas.sql     bronze · silver · gold

@@ -13,3 +13,8 @@ var/
 .env
 .env.*
 !.env.example
+.dagster/
+.tmp_dagster_home_*/
+storage/
+logs/
+compute_logs/
