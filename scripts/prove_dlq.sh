@@ -9,12 +9,12 @@
 #   echo '{"not":"valid"' | rpk topic produce ticketing.bookings
 #   rpk topic consume ticketing.bookings.dlq -n 1
 #
-# This script drives the live path via confluent_kafka so it works against
-# Redpanda or Kafka without depending on rpk produce quirks.
+# The live path below drives the same EventExtractor through confluent_kafka so
+# it works against Redpanda or Kafka without depending on rpk produce quirks.
 #
 # Usage:
 #   ./scripts/prove_dlq.sh
-#   BROKERS=127.0.0.1:9092 ./scripts/prove_dlq.sh
+#   BROKERS=localhost:19092 ./scripts/prove_dlq.sh
 #   SKIP_LIVE=1 ./scripts/prove_dlq.sh
 
 set -euo pipefail
@@ -22,10 +22,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BROKERS="${BROKERS:-127.0.0.1:9092}"
+# Compose advertises the external listener on 19092 (docker-compose.yml).
+BROKERS="${BROKERS:-${KAFKA_BOOTSTRAP:-localhost:19092}}"
 TOPIC="ticketing.bookings"
 DLQ="ticketing.bookings.dlq"
-POISON=$(printf '%s' '{"not":"valid"')
 
 echo "==> unit proof (mock broker; green on a clean clone)"
 python3 -m pip install -e '.[dev]' -q
@@ -36,22 +36,21 @@ if [[ "${SKIP_LIVE:-0}" == "1" ]]; then
   exit 0
 fi
 
-broker_up() {
-  python3 - <<PY
-from confluent_kafka.admin import AdminClient
-AdminClient({"bootstrap.servers": "${BROKERS}"}).list_topics(timeout=3)
-print("ok")
-PY
-}
-
 if ! python3 -c "import confluent_kafka" 2>/dev/null; then
   python3 -m pip install 'confluent-kafka>=2.3' -q
 fi
 
+broker_up() {
+  python3 - <<PY
+from confluent_kafka.admin import AdminClient
+AdminClient({"bootstrap.servers": "${BROKERS}"}).list_topics(timeout=3)
+PY
+}
+
 if ! broker_up >/dev/null 2>&1; then
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
     echo "==> starting redpanda via docker compose"
-    docker compose up -d redpanda >/dev/null 2>&1 || true
+    docker compose up -d redpanda redpanda-init >/dev/null 2>&1 || true
     for _ in $(seq 1 40); do
       broker_up >/dev/null 2>&1 && break
       sleep 1
@@ -70,24 +69,28 @@ if command -v rpk >/dev/null 2>&1; then
   rpk topic create "${TOPIC}" -p 1 -r 1 -X "brokers=${BROKERS}" 2>/dev/null || true
   rpk topic create "${DLQ}" -p 1 -r 1 -X "brokers=${BROKERS}" 2>/dev/null || true
 else
-  python3 - <<PY
+  BROKERS="${BROKERS}" TOPIC="${TOPIC}" DLQ="${DLQ}" python3 - <<'PY'
+import os
+
 from confluent_kafka.admin import AdminClient, NewTopic
-admin = AdminClient({"bootstrap.servers": "${BROKERS}"})
-fs = admin.create_topics([
-    NewTopic("${TOPIC}", num_partitions=1, replication_factor=1),
-    NewTopic("${DLQ}", num_partitions=1, replication_factor=1),
-])
-for t, f in fs.items():
+
+admin = AdminClient({"bootstrap.servers": os.environ["BROKERS"]})
+for topic, future in admin.create_topics(
+    [
+        NewTopic(os.environ["TOPIC"], num_partitions=1, replication_factor=1),
+        NewTopic(os.environ["DLQ"], num_partitions=1, replication_factor=1),
+    ]
+).items():
     try:
-        f.result()
-        print(f"created {t}")
-    except Exception as exc:
-        print(f"{t}: {exc}")
+        future.result()
+        print(f"created {topic}")
+    except Exception as exc:  # topic already exists is fine
+        print(f"{topic}: {exc}")
 PY
 fi
 
 echo "==> inject poison + consume through EventExtractor + read DLQ"
-BROKERS="${BROKERS}" POISON="${POISON}" TOPIC="${TOPIC}" DLQ="${DLQ}" python3 - <<'PY'
+BROKERS="${BROKERS}" TOPIC="${TOPIC}" DLQ="${DLQ}" python3 - <<'PY'
 import os
 import sys
 import time
@@ -97,29 +100,36 @@ from pathlib import Path
 sys.path.insert(0, str(Path("src").resolve()))
 
 from confluent_kafka import Consumer, Producer
-from confluent_kafka.admin import AdminClient, NewTopic
 
-from extractors.events import BOOKINGS_TOPIC, DLQ_TOPIC, EventExtractor
+from extractors.events import (
+    BOOKINGS_TOPIC,
+    DLQ_TOPIC,
+    ConfluentDeadLetterProducer,
+    EventExtractor,
+    _ConfluentMessage,
+)
 
 BROKERS = os.environ["BROKERS"]
 TOPIC = os.environ["TOPIC"]
 DLQ = os.environ["DLQ"]
 assert TOPIC == BOOKINGS_TOPIC and DLQ == DLQ_TOPIC
-# Unique per run so we do not match an earlier DLQ residue.
+# Unique per run so we never match an earlier DLQ record.
 POISON = f'{{"not":"valid","run":"{uuid.uuid4().hex[:8]}"'.encode("utf-8")
 
 
 class _NoopBronze:
+    """The DLQ path never reaches bronze; a merge here would be the bug."""
+
     def merge(self, rows, *, key):
-        return len(rows)
+        raise AssertionError("poison message must not reach bronze")
 
 
 class _NoopQuarantine:
     def write(self, rows):
-        return None
+        raise AssertionError("with a DLQ configured, poison must not quarantine")
 
 
-class _ConfluentConsumer:
+class _PollingConsumer:
     def __init__(self, consumer):
         self._c = consumer
 
@@ -130,34 +140,22 @@ class _ConfluentConsumer:
                 continue
             if msg.error():
                 raise RuntimeError(msg.error())
-            yield msg
+            yield _ConfluentMessage(msg)
 
     def commit(self, msg):
-        self._c.commit(message=msg, asynchronous=False)
+        self._c.commit(message=msg._raw, asynchronous=False)
 
 
-class _ConfluentProducer:
-    def __init__(self, producer):
-        self._p = producer
-
-    def produce(self, *, topic, value, headers):
-        self._p.produce(topic, value=value, headers=list(headers))
-
-    def flush(self):
-        self._p.flush(10)
-
-
-group = f"cinema-ops-dlq-proof-{uuid.uuid4().hex[:8]}"
 consumer = Consumer(
     {
         "bootstrap.servers": BROKERS,
-        "group.id": group,
+        "group.id": f"cinema-ops-dlq-proof-{uuid.uuid4().hex[:8]}",
         "auto.offset.reset": "latest",
         "enable.auto.commit": False,
     }
 )
 consumer.subscribe([TOPIC])
-# Wait for assignment so we don't miss the produce.
+# Wait for assignment so the produce below is not missed.
 deadline = time.time() + 15
 while time.time() < deadline and not consumer.assignment():
     consumer.poll(0.2)
@@ -168,10 +166,10 @@ producer.flush(10)
 print(f"produced poison to {TOPIC}: {POISON!r}", flush=True)
 
 extractor = EventExtractor(
-    consumer=_ConfluentConsumer(consumer),
+    consumer=_PollingConsumer(consumer),
     bronze_store=_NoopBronze(),
     quarantine_store=_NoopQuarantine(),
-    dlq_producer=_ConfluentProducer(Producer({"bootstrap.servers": BROKERS})),
+    dlq_producer=ConfluentDeadLetterProducer(bootstrap=BROKERS),
 )
 stats = extractor.consume(max_messages=1)
 print(
@@ -212,5 +210,6 @@ print(f"DLQ value={found.value()!r}")
 print(f"DLQ headers={headers}")
 assert "invalid json" in headers.get("reason", ""), headers
 assert headers.get("source_topic") == TOPIC, headers
+assert "source_partition" in headers and "source_offset" in headers, headers
 print("PROOF OK — poison message on DLQ; original bytes + headers; offset committed.")
 PY

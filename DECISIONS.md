@@ -201,8 +201,9 @@ source — meaning my pipeline stalling silently becomes their disk filling up. 
 put a failure of mine into a production system I do not operate.
 
 **Consequences** No hard-delete detection, no intermediate states, and the overlap window is
-currently a guess (`ARCHITECTURE.md` section 8, Q3). Too narrow loses data; too wide costs source reads
-every run. It is a number I am carrying as an estimate and intend to replace with a measurement.
+currently a guess: `SAFETY_LAG = timedelta(minutes=5)` in `src/extractors/cinema_ops.py`
+(`ARCHITECTURE.md` section 2c / Q3). Too narrow loses data; too wide costs source reads every run.
+Replace the guess with the max observed source transaction duration once measured.
 
 **What would change my mind** Owning the source database, or a business requirement that turns on
 deletions — refund reversals, GDPR erasure propagation, anything where a row's disappearance is
@@ -370,6 +371,13 @@ through the consumer after a fix.
 accepted events; DLQ volume is a first-class signal and must be monitored. Replay is a deliberate
 operation against the DLQ topic, not automatic redrive. The compose stack creates the DLQ topic
 alongside `ticketing.bookings`.
+
+The DLQ is opt-in per consumer (`--dlq`, `consume_events(dlq_topic=...)`). With no dead-letter
+producer configured the same failure lands in `bronze.quarantine` instead, which is what the VDE-18
+and VDE-21 proofs assert against. Two substrates for one rule — the failure is always recorded
+somewhere durable before the offset moves — and the caller chooses which. That is deliberate: the
+DLQ buys replay, and a consumer that cannot replay should not be paying for a second copy of the
+evidence.
 
 **What would change my mind** A poison message that implies the whole partition is corrupt (wrong
 codec for the topic, not a single bad event) — there advancing past it would hide a systemic

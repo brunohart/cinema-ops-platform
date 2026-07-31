@@ -13,37 +13,61 @@ services:
       - ./sql/bronze/001_quarantine.sql:/docker-entrypoint-initdb.d/010_quarantine.sql:ro
       - ./sql/bronze/002_quarantine_grants.sql:/docker-entrypoint-initdb.d/011_quarantine_grants.sql:ro
       - ./sql/001_bronze.sql:/docker-entrypoint-initdb.d/020_landing.sql:ro
+      - ./sql/meta/001_watermarks.sql:/docker-entrypoint-initdb.d/030_meta_watermarks.sql:ro
+      - ./sql/cinema_ops/001_bookings.sql:/docker-entrypoint-initdb.d/031_cinema_ops.sql:ro
+      - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/032_raw_cinema_ops.sql:ro
+      - ./sql/bronze/003_events_raw.sql:/docker-entrypoint-initdb.d/033_events_raw.sql:ro
+      - ./sql/bronze/004_events_raw_grants.sql:/docker-entrypoint-initdb.d/034_events_raw_grants.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
       timeout: 5s
       retries: 20
 
-  # ADR-007 — Redpanda over Kafka. Single binary; Kafka-API compatible.
+  # ADR-007 — Redpanda over Kafka. Kafka-API compatible, single binary.
   redpanda:
-    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
     command:
       - redpanda
       - start
-      - --overprovisioned
-      - --smp
-      - "1"
-      - --memory
-      - 512M
-      - --reserve-memory
-      - 0M
-      - --node-id
-      - "0"
-      - --check=false
-      - --kafka-addr
-      - internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr
-      - internal://redpanda:9092,external://127.0.0.1:9092
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=warn
     ports:
-      - "9092:9092"
-      - "9644:9644"
+      - "18081:18081"
+      - "18082:18082"
+      - "19092:19092"
+      - "19644:9644"
     healthcheck:
-      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy'"]
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
       interval: 3s
       timeout: 5s
-      retries: 20
+      retries: 30
+
+  # Create ticketing.bookings + its dead-letter topic once Redpanda is healthy
+  # (VDE-18 proof prelude; VDE-19 DLQ).
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    network_mode: service:redpanda
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+          rpk topic create ticketing.bookings -p 3 -r 1 --brokers localhost:9092 \
+            && rpk topic create ticketing.bookings.dlq -p 1 -r 1 --brokers localhost:9092 \
+            && break
+          sleep 2
+        done
+        rpk topic list --brokers localhost:9092
+    restart: "no"

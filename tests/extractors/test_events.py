@@ -1,4 +1,4 @@
-"""Proof for VDE-19 / VDE-20 — DLQ poison messages; commit after handling.
+"""Proof for VDE-19 / VDE-20 / VDE-21 — DLQ poison messages; commit after handling.
 
 Issue proof (live broker, when Redpanda is up):
 
@@ -245,3 +245,48 @@ def test_good_message_after_poison_still_merges() -> None:
     assert len(bronze.rows) == 1
     assert len(dlq.records) == 1
     assert [m.offset for m in consumer.commits] == [0, 1]
+
+
+def test_without_dlq_producer_poison_falls_back_to_quarantine() -> None:
+    """VDE-18/VDE-21 substrate: no DLQ configured means bronze.quarantine keeps the evidence."""
+    poison = SimpleMessage(value=b'{"not":"valid"', offset=4)
+    consumer = InMemoryConsumer(messages=[poison])
+    bronze = RecordingBronzeStore()
+    quarantine = RecordingQuarantineStore()
+    extractor = EventExtractor(
+        consumer=consumer,
+        bronze_store=bronze,
+        quarantine_store=quarantine,
+        clock=lambda: datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        batch_id_factory=lambda: "batch-no-dlq",
+    )
+
+    stats = extractor.consume()
+
+    assert stats.dead_lettered == 0
+    assert stats.quarantined == 1
+    assert stats.committed == 1
+    assert bronze.rows == {}
+    assert "invalid json" in quarantine.rows[0]["_quarantine_reason"]
+
+
+def test_commit_waits_for_the_kill_window_before_committing() -> None:
+    """VDE-21: commit_delay_seconds sleeps between the bronze write and the commit."""
+    call_log: list[str] = []
+    bronze = RecordingBronzeStore()
+    bronze.call_log = call_log
+    consumer = OrderingConsumer([SimpleMessage(value={"event_id": "evt-1"}, offset=0)], call_log)
+
+    extractor = EventExtractor(
+        consumer=consumer,
+        bronze_store=bronze,
+        quarantine_store=RecordingQuarantineStore(),
+        clock=lambda: datetime(2026, 7, 31, 12, 0, tzinfo=UTC),
+        batch_id_factory=lambda: "batch-kill-window",
+        commit_delay_seconds=0.02,
+        sleep=lambda seconds: call_log.append(f"sleep:{seconds}"),
+    )
+    stats = extractor.consume()
+
+    assert stats.committed == 1
+    assert call_log == ["merge", "sleep:0.02", "commit"]

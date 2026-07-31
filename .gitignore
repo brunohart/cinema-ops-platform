@@ -9,6 +9,7 @@ __pycache__/
 venv/
 landing/*.csv
 !landing/.gitkeep
+var/
 .env
 .env.*
 !.env.example
