@@ -2,6 +2,7 @@
 
 from extractors.base import BaseExtractor, ExtractorResult, RetryPolicy
 from extractors.database import DatabaseExtractor
+from extractors.events import EventExtractor
 from extractors.files import FileExtractor
 from extractors.postgres import (
     PostgresBronzeStore,
@@ -14,6 +15,7 @@ from extractors.tmdb import TMDBExtractor
 __all__ = [
     "BaseExtractor",
     "DatabaseExtractor",
+    "EventExtractor",
     "ExtractorResult",
     "FileExtractor",
     "PostgresBronzeStore",
