@@ -13,7 +13,13 @@ var/
 .env
 .env.*
 !.env.example
+
+# dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/
 dbt/logs/
 dbt/dbt_packages/
 dbt/.user.yml
+transform/target/
+transform/dbt_packages/
+transform/logs/
+transform/.user.yml

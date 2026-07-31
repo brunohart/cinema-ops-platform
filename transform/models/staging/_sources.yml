@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Mutable upstream stand-ins. Not bronze — bronze is append-only and never
+      UPDATEd. The VDE-27 proof retitles raw.film to show SCD Type 2 history.
+    schema: raw
+    tables:
+      - name: film
+        description: Film metadata attributes watched by film_snapshot.
+        columns:
+          - name: film_id
+            description: Natural key for the film.
+            tests:
+              - unique
+              - not_null
+          - name: title
+          - name: runtime
+          - name: certification
