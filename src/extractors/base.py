@@ -63,6 +63,23 @@ class RowValidator(Protocol):
     def validate(self, row: dict[str, Any]) -> tuple[bool, str | None]: ...
 
 
+@runtime_checkable
+class PipelineRunStore(Protocol):
+    """Append-only run log — proves a run executed even when bronze merges zero rows."""
+
+    def record(
+        self,
+        *,
+        source: str,
+        batch_id: str,
+        fetched: int,
+        merged: int,
+        quarantined: int,
+        started_at: datetime,
+        finished_at: datetime,
+    ) -> None: ...
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     """Exponential backoff with full jitter around ``fetch()`` only."""
@@ -112,6 +129,7 @@ class BaseExtractor(ABC):
         state_store: StateStore,
         bronze_store: BronzeStore,
         quarantine_store: QuarantineStore,
+        pipeline_run_store: PipelineRunStore | None = None,
         validator: RowValidator | None = None,
         retry: RetryPolicy | None = None,
         sleep: Callable[[float], None] = time.sleep,
@@ -123,6 +141,7 @@ class BaseExtractor(ABC):
         self.state_store = state_store
         self.bronze_store = bronze_store
         self.quarantine_store = quarantine_store
+        self.pipeline_run_store = pipeline_run_store
         self.validator: RowValidator = validator or DefaultRowValidator()
         self.retry = retry or RetryPolicy()
         self._sleep = sleep
@@ -174,6 +193,7 @@ class BaseExtractor(ABC):
         Order is load-bearing. The new watermark is written last, after a successful
         bronze merge, so a crash mid-run re-fetches rather than skipping data.
         """
+        started_at = self._clock()
         watermark = self.state_store.read_watermark(self.source)
         rows, new_watermark = self._fetch_with_retry(watermark)
 
@@ -190,6 +210,18 @@ class BaseExtractor(ABC):
 
         # Watermark AFTER a successful write, never before.
         self.state_store.write_watermark(self.source, new_watermark)
+
+        finished_at = self._clock()
+        if self.pipeline_run_store is not None:
+            self.pipeline_run_store.record(
+                source=self.source,
+                batch_id=batch_id,
+                fetched=len(rows),
+                merged=merged,
+                quarantined=len(rejected),
+                started_at=started_at,
+                finished_at=finished_at,
+            )
 
         return ExtractorResult(
             fetched=len(rows),
