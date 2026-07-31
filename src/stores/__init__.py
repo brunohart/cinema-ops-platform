@@ -4,8 +4,10 @@
 Landing-file bronze/state live in ``stores.postgres`` (``bronze.raw_landing_files``,
 ``ops.watermarks``). Query-based CDC (VDE-16) uses ``TransactionalCinemaOpsStore``
 against ``meta.watermarks`` + ``bronze.raw_cinema_ops``.
+Agent tool provenance (VDE-43) lands in ``meta.agent_access_log``.
 """
 
+from stores.agent_access_log import AgentAccessLogStore
 from stores.database import TransactionalCinemaOpsStore
 from stores.postgres import LandingBronzeStore, LandingStateStore, apply_schema, dsn_from_env
 from stores.quarantine import (
@@ -15,6 +17,7 @@ from stores.quarantine import (
 )
 
 __all__ = [
+    "AgentAccessLogStore",
     "LandingBronzeStore",
     "LandingStateStore",
     "PostgresQuarantineStore",
