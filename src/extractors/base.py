@@ -118,6 +118,8 @@ class BaseExtractor(ABC):
     """Abstract extractor using the template method pattern.
 
     Subclasses implement ``fetch()`` — and only ``fetch()``. ``run()`` is final.
+    Bronze audit columns are applied only via ``stamp()`` on this base class so no
+    subclass can forget them (VDE-10 / CLAUDE.md layer rules).
     """
 
     def __init__(
@@ -147,6 +149,11 @@ class BaseExtractor(ABC):
         self._rng = rng or random.Random()
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
 
+    @property
+    def source_name(self) -> str:
+        """Canonical source identifier written to ``_source`` on every bronze row."""
+        return self.source
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if "run" in cls.__dict__:
@@ -161,6 +168,25 @@ class BaseExtractor(ABC):
             new_watermark: value to persist only after a successful bronze write
         """
 
+    def stamp(self, row: dict[str, Any], batch_id: str) -> dict[str, Any]:
+        """Put the bronze audit stamp on a raw payload.
+
+        ``_batch_id`` answers which run wrote the row. ``_payload_hash`` (with
+        ``sort_keys=True``) makes a re-run a merge instead of a duplication —
+        without sorted keys, dict ordering changes the hash and dedup silently
+        stops working.
+        """
+        # Hash the payload alone — not the metadata — so re-stamping the same
+        # record yields the same merge key across runs.
+        payload = json.dumps(row, sort_keys=True, default=str)
+        return {
+            "_payload": row,
+            "_ingested_at": self._clock(),
+            "_source": self.source_name,
+            "_batch_id": batch_id,
+            "_payload_hash": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+        }
+
     def run(self) -> ExtractorResult:
         """Concrete template method: watermark → fetch → stamp → validate → merge → watermark.
 
@@ -172,10 +198,7 @@ class BaseExtractor(ABC):
         rows, new_watermark = self._fetch_with_retry(watermark)
 
         batch_id = self._batch_id_factory()
-        ingested_at = self._clock()
-        stamped = [
-            self._stamp_row(row, batch_id=batch_id, ingested_at=ingested_at) for row in rows
-        ]
+        stamped = [self.stamp(row, batch_id) for row in rows]
 
         accepted, rejected = self._partition_by_validation(stamped)
         if rejected:
@@ -239,28 +262,6 @@ class BaseExtractor(ABC):
         exp = self.retry.base_delay_seconds * (2 ** (attempt - 1))
         ceiling = min(self.retry.max_delay_seconds, exp)
         return self._rng.uniform(0.0, ceiling)
-
-    def _stamp_row(
-        self,
-        payload: dict[str, Any],
-        *,
-        batch_id: str,
-        ingested_at: datetime,
-    ) -> dict[str, Any]:
-        """Attach the four bronze metadata columns; payload stays unparsed."""
-        payload_hash = self._hash_payload(payload)
-        return {
-            "_payload": payload,
-            "_ingested_at": ingested_at,
-            "_source": self.source,
-            "_batch_id": batch_id,
-            "_payload_hash": payload_hash,
-        }
-
-    @staticmethod
-    def _hash_payload(payload: dict[str, Any]) -> str:
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     def _partition_by_validation(
         self,

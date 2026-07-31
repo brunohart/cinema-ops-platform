@@ -7,6 +7,7 @@ from extractors.postgres import (
     PostgresQuarantineStore,
     PostgresStateStore,
 )
+from extractors.tmdb import TMDBExtractor
 
 __all__ = [
     "BaseExtractor",
@@ -16,4 +17,5 @@ __all__ = [
     "PostgresQuarantineStore",
     "PostgresStateStore",
     "RetryPolicy",
+    "TMDBExtractor",
 ]
