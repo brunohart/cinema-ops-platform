@@ -158,7 +158,14 @@ models:
       - name: booking_total
         description: Measure — total amount for the booking.
       - name: channel_code
-        description: Degenerate dimension — sales channel code (not a measure).
+        description: >
+          Degenerate dimension — sales channel code (not a measure).
+          Null when the booking was seen only in cinema_ops (no ticketing event).
+          Closed set matches the ticketing producer contract (CHANNELS).
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['web', 'kiosk', 'app', 'box_office']
       - name: booked_at
         description: Booking event timestamp.
         data_tests:
