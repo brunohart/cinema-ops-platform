@@ -1,0 +1,17 @@
+# Local / CI profile. Credentials from env with docker-compose defaults.
+# Point DBT_PROFILES_DIR at this directory (see scripts/prove-silver.sh).
+
+cinema_ops:
+  target: local
+  outputs:
+    local:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_USER', 'cinema') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'cinema') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'cinema_ops') }}"
+      schema: public
+      threads: 4
+      keepalives_idle: 0
+      connect_timeout: 10

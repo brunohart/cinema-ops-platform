@@ -1,0 +1,6 @@
+# Dagster workspace — ``dagster dev`` loads this code location (VDE-22).
+load_from:
+  - python_module:
+      module_name: orchestration.definitions
+      working_directory: src
+      location_name: cinema_ops
