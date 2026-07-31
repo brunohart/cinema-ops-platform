@@ -8,6 +8,9 @@ Proofs:
     python -m src.cli extract tmdb
     psql $DB -c "select count(*) from bronze.film_raw"
 
+    python -m src.cli extract database
+    psql $DB -c "select * from meta.watermarks"
+
     python -m src.cli produce events
     python -m src.cli consume events
     psql $DB -c "select count(*) from bronze.events_raw"
@@ -26,6 +29,7 @@ _SRC = Path(__file__).resolve().parent
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+from extractors.database import DatabaseExtractor  # noqa: E402
 from extractors.events import (  # noqa: E402
     DEFAULT_BOOTSTRAP,
     DEFAULT_GROUP_ID,
@@ -34,6 +38,7 @@ from extractors.events import (  # noqa: E402
     produce_events,
 )
 from extractors.files import FileExtractor  # noqa: E402
+from stores.database import TransactionalCinemaOpsStore  # noqa: E402
 from stores.postgres import (  # noqa: E402
     DsnQuarantineStore,
     LandingBronzeStore,
@@ -85,6 +90,19 @@ def _bootstrap_events_schema(dsn: str) -> None:
     )
 
 
+def _bootstrap_database_schema(dsn: str) -> None:
+    """Apply VDE-16 meta watermarks + cinema_ops source + bronze landing DDL."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "meta" / "001_watermarks.sql"),
+        str(root / "sql" / "cinema_ops" / "001_bookings.sql"),
+        str(root / "sql" / "bronze" / "003_raw_cinema_ops.sql"),
+    )
+
+
 def _kafka_bootstrap() -> str:
     return os.environ.get("KAFKA_BOOTSTRAP") or DEFAULT_BOOTSTRAP
 
@@ -118,6 +136,30 @@ def cmd_extract_files(args: argparse.Namespace) -> int:
         f"source={extractor.source} fetched={result.fetched} "
         f"merged={result.merged} quarantined={result.quarantined} "
         f"batch_id={result.batch_id}"
+    )
+    return 0
+
+
+def cmd_extract_database(args: argparse.Namespace) -> int:
+    """Incremental pull from cinema_ops on updated_at (VDE-16)."""
+    _load_dotenv()
+    dsn = dsn_from_env()
+
+    if not args.skip_schema:
+        _bootstrap_database_schema(dsn)
+
+    with TransactionalCinemaOpsStore(dsn) as store:
+        extractor = DatabaseExtractor(
+            source_dsn=dsn,
+            state_store=store,
+            bronze_store=store,
+            quarantine_store=DsnQuarantineStore(dsn),
+        )
+        result = extractor.run()
+    print(
+        f"source={extractor.source} fetched={result.fetched} "
+        f"merged={result.merged} quarantined={result.quarantined} "
+        f"watermark={result.watermark} batch_id={result.batch_id}"
     )
     return 0
 
@@ -221,6 +263,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     tmdb = extract_sub.add_parser("tmdb", help="Pull TMDB film metadata into bronze")
     tmdb.set_defaults(func=cmd_extract_tmdb)
+
+    database = extract_sub.add_parser(
+        "database",
+        help="Incremental pull from cinema_ops on updated_at (meta.watermarks)",
+    )
+    database.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap meta/cinema_ops/bronze DDL before extracting",
+    )
+    database.set_defaults(func=cmd_extract_database)
 
     produce = sub.add_parser("produce", help="Emit synthetic source data")
     produce_sub = produce.add_subparsers(dest="source", required=True)

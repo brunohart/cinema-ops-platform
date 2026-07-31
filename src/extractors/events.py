@@ -1,10 +1,18 @@
-"""Synthetic ticketing stream — Redpanda producer + consumer (VDE-18).
+"""Ticketing stream — synthetic producer (VDE-18) + offset-after-write consumer (VDE-20).
 
-Model 01: tables and streams are the same thing. Kafka offsets are the
-watermark: ``enable.auto.commit=False``, and the offset moves only after a
-successful bronze (or quarantine) write.
+Model 01 — tables and streams are the same thing.
+Model 02 — Exactly-once does not exist. Effectively-once does.
 
-Producer emits booking events with:
+Kafka offsets are the watermark: ``enable.auto.commit=False``, and the offset
+moves only after a successful bronze (or quarantine) write.
+
+Commit before processing and a crash loses the message with no error anywhere.
+Commit after and a crash repeats it — visible, and survivable because the bronze
+write merges idempotently on ``_payload_hash`` (ADR-008).
+
+The ordering IS the task. Everything else is plumbing.
+
+Producer (VDE-18) emits booking events with:
   - deterministic ``event_id`` (seed + sequence)
   - ``event_time`` sometimes a few minutes in the past (late arrivals)
   - a small percentage of deliberately malformed payloads
@@ -12,19 +20,24 @@ Producer emits booking events with:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import random
 import time
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
-from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, TopicPartition
-
-from extractors.base import BaseExtractor
+from extractors.base import (
+    BRONZE_MERGE_KEY,
+    BronzeStore,
+    DefaultRowValidator,
+    QuarantineStore,
+    RowValidator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +50,169 @@ DEFAULT_LATE_RATE = 0.25
 CINEMAS = ("SYL", "QTN", "BRK", "PAD")
 CHANNELS = ("web", "kiosk", "app", "box_office")
 SEAT_ROWS = "ABCDEFGH"
+
+
+# ---------------------------------------------------------------------------
+# VDE-20 — protocol consumer + EventExtractor (validate → merge → commit)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ConsumerMessage(Protocol):
+    """Minimal Kafka/Redpanda message surface used by the consume loop."""
+
+    @property
+    def value(self) -> Any: ...
+
+
+@runtime_checkable
+class EventConsumer(Protocol):
+    """Consumer with manual offset commits — auto-commit must be off."""
+
+    def __iter__(self) -> Iterator[ConsumerMessage]: ...
+
+    def commit(self, msg: ConsumerMessage) -> None: ...
+
+
+@dataclass(frozen=True)
+class ConsumeStats:
+    processed: int = 0
+    merged: int = 0
+    quarantined: int = 0
+    committed: int = 0
+
+
+@dataclass
+class SimpleMessage:
+    """In-memory message for tests and local fixtures."""
+
+    value: Any
+    topic: str = "ticketing"
+    partition: int = 0
+    offset: int = 0
+
+
+@dataclass
+class InMemoryConsumer:
+    """Test double: yields messages and records every ``commit`` call."""
+
+    messages: list[ConsumerMessage]
+    commits: list[ConsumerMessage] = field(default_factory=list)
+
+    def __iter__(self) -> Iterator[ConsumerMessage]:
+        yield from self.messages
+
+    def commit(self, msg: ConsumerMessage) -> None:
+        self.commits.append(msg)
+
+
+class EventExtractor:
+    """Consume ticketing events into bronze with at-least-once offset handling.
+
+    Auto-commit is never used. The consumer group offset advances only after a
+    successful validate → merge (or quarantine) for that message.
+    """
+
+    def __init__(
+        self,
+        *,
+        consumer: EventConsumer,
+        bronze_store: BronzeStore,
+        quarantine_store: QuarantineStore,
+        validator: RowValidator | None = None,
+        source: str = SOURCE_NAME,
+        clock: Callable[[], datetime] | None = None,
+        batch_id_factory: Callable[[], str] | None = None,
+    ) -> None:
+        self.consumer = consumer
+        self.bronze_store = bronze_store
+        self.quarantine_store = quarantine_store
+        self.validator: RowValidator = validator or DefaultRowValidator()
+        self.source = source
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
+
+    def consume(self, *, max_messages: int | None = None) -> ConsumeStats:
+        """Drain the consumer (or up to ``max_messages``).
+
+        Ordering is load-bearing — do not reorder the three steps in the loop.
+        """
+        processed = 0
+        merged = 0
+        quarantined = 0
+        committed = 0
+        batch_id = self._batch_id_factory()
+
+        # The ordering IS the task. Everything else is plumbing.
+        for msg in self.consumer:
+            row = self.validate(msg, batch_id=batch_id)  # 1. parse
+            merged_n, quarantined_n = self.merge_to_bronze(row)  # 2. write, idempotent
+            self.consumer.commit(msg)  # 3. only now
+
+            processed += 1
+            merged += merged_n
+            quarantined += quarantined_n
+            committed += 1
+
+            if max_messages is not None and processed >= max_messages:
+                break
+
+        return ConsumeStats(
+            processed=processed,
+            merged=merged,
+            quarantined=quarantined,
+            committed=committed,
+        )
+
+    def validate(self, msg: ConsumerMessage, *, batch_id: str) -> dict[str, Any]:
+        """Parse the message value into a stamped bronze row (or a reject)."""
+        payload = self._parse_value(msg.value)
+        return self._stamp(payload, batch_id=batch_id)
+
+    def merge_to_bronze(self, row: dict[str, Any]) -> tuple[int, int]:
+        """Idempotent bronze write. Invalid rows quarantine; both paths return."""
+        ok, error = self.validator.validate(row)
+        if not ok:
+            quarantined = dict(row)
+            quarantined["_quarantine_reason"] = error or "validation failed"
+            self.quarantine_store.write([quarantined])
+            return 0, 1
+
+        written = self.bronze_store.merge([row], key=BRONZE_MERGE_KEY)
+        return written, 0
+
+    def _parse_value(self, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {"_parse_error": "empty message value"}
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, (bytes, bytearray)):
+            text = bytes(value).decode("utf-8")
+        else:
+            text = str(value)
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError) as exc:
+            return {"_parse_error": f"invalid json: {exc}", "_raw": text}
+        if not isinstance(parsed, dict):
+            return {"_parse_error": "json payload is not an object", "_raw": parsed}
+        return parsed
+
+    def _stamp(self, payload: dict[str, Any], *, batch_id: str) -> dict[str, Any]:
+        """Bronze audit columns — same contract as ``BaseExtractor.stamp``."""
+        serialised = json.dumps(payload, sort_keys=True, default=str)
+        return {
+            "_payload": payload,
+            "_ingested_at": self._clock(),
+            "_source": self.source,
+            "_batch_id": batch_id,
+            "_payload_hash": hashlib.sha256(serialised.encode("utf-8")).hexdigest(),
+        }
+
+
+# ---------------------------------------------------------------------------
+# VDE-18 — synthetic producer + confluent-kafka adapter + bronze.events_raw
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -118,11 +294,13 @@ def produce_events(
     late_rate: float = DEFAULT_LATE_RATE,
     start_seq: int = 1,
     clock: Callable[[], datetime] | None = None,
-    producer: Producer | None = None,
+    producer: Any | None = None,
 ) -> ProduceResult:
     """Emit ``count`` synthetic booking events to ``topic``."""
     if count < 1:
         raise ValueError("count must be >= 1")
+
+    from confluent_kafka import Producer
 
     prod = producer or Producer(
         {
@@ -195,38 +373,6 @@ class EventsBronzeStore:
         return written
 
 
-class KafkaOffsetStateStore:
-    """Kafka consumer-group offsets are the watermark.
-
-    ``write_watermark`` commits the TopicPartitions collected during ``fetch``.
-    ``read_watermark`` is a no-op (the broker holds the cursor).
-    """
-
-    def __init__(self, consumer: Consumer) -> None:
-        self._consumer = consumer
-        self._pending: list[TopicPartition] = []
-
-    def read_watermark(self, source: str) -> Any:
-        del source
-        return None
-
-    def set_pending(self, partitions: list[TopicPartition]) -> None:
-        self._pending = list(partitions)
-
-    def write_watermark(self, source: str, watermark: Any) -> None:
-        del source
-        # Prefer explicit partitions from fetch(); fall back to watermark value.
-        partitions = self._pending or list(watermark or [])
-        if not partitions:
-            return
-        self._consumer.commit(offsets=partitions, asynchronous=False)
-        self._pending = []
-        logger.info(
-            "committed kafka offsets: %s",
-            [(p.topic, p.partition, p.offset) for p in partitions],
-        )
-
-
 class MalformedEventValidator:
     """Quarantine producer-injected broken payloads; accept the rest."""
 
@@ -234,8 +380,8 @@ class MalformedEventValidator:
         payload = row.get("_payload")
         if not isinstance(payload, dict):
             return False, "missing or non-object _payload"
-        if payload.get("__malformed__"):
-            return False, payload.get("error") or "malformed ticketing payload"
+        if payload.get("_parse_error"):
+            return False, str(payload["_parse_error"])
         for col in ("_ingested_at", "_source", "_batch_id", "_payload_hash"):
             if col not in row:
                 return False, f"missing bronze column {col}"
@@ -244,11 +390,34 @@ class MalformedEventValidator:
         return True, None
 
 
-class EventsExtractor(BaseExtractor):
-    """Poll Redpanda, stamp into bronze, commit offsets only after the write.
+@dataclass
+class _ConfluentMessage:
+    """Adapt a confluent-kafka Message to the ``ConsumerMessage`` protocol."""
 
-    ``enable.auto.commit`` is False. A crash between merge and commit redelivers
-    — which is fine because bronze merges on ``_payload_hash`` (ADR-008).
+    _raw: Any
+
+    @property
+    def value(self) -> Any:
+        return self._raw.value()
+
+    @property
+    def topic(self) -> str:
+        return self._raw.topic()
+
+    @property
+    def partition(self) -> int:
+        return self._raw.partition()
+
+    @property
+    def offset(self) -> int:
+        return self._raw.offset()
+
+
+class ConfluentEventConsumer:
+    """Real Redpanda/Kafka consumer with ``enable.auto.commit=False``.
+
+    Implements ``EventConsumer`` so ``EventExtractor`` stays broker-agnostic
+    (VDE-20) while the CLI can talk to a live topic (VDE-18).
     """
 
     def __init__(
@@ -260,15 +429,16 @@ class EventsExtractor(BaseExtractor):
         max_messages: int = 100,
         poll_timeout_seconds: float = 1.0,
         idle_timeout_seconds: float = 5.0,
-        consumer: Consumer | None = None,
-        **kwargs: Any,
+        consumer: Any | None = None,
     ) -> None:
-        self.bootstrap = bootstrap
+        from confluent_kafka import Consumer, KafkaError, KafkaException
+
         self.topic = topic
-        self.group_id = group_id
         self.max_messages = max_messages
         self.poll_timeout_seconds = poll_timeout_seconds
         self.idle_timeout_seconds = idle_timeout_seconds
+        self._KafkaError = KafkaError
+        self._KafkaException = KafkaException
 
         self._owns_consumer = consumer is None
         self._consumer = consumer or Consumer(
@@ -276,7 +446,7 @@ class EventsExtractor(BaseExtractor):
                 "bootstrap.servers": bootstrap,
                 "group.id": group_id,
                 # Do not use the auto-commit default — controlling when the
-                # offset moves is the entire point of VDE-18 / Model 01.
+                # offset moves is the entire point of VDE-18 / VDE-20.
                 "enable.auto.commit": False,
                 "auto.offset.reset": "earliest",
                 "client.id": "cinema-ops-events-consumer",
@@ -285,33 +455,15 @@ class EventsExtractor(BaseExtractor):
         if self._owns_consumer:
             self._consumer.subscribe([topic])
 
-        kwargs.setdefault("source", SOURCE_NAME)
-        kwargs.setdefault("validator", MalformedEventValidator())
-        if "state_store" not in kwargs:
-            kwargs["state_store"] = KafkaOffsetStateStore(self._consumer)
-
-        super().__init__(**kwargs)
-        self._offset_store = (
-            self.state_store if isinstance(self.state_store, KafkaOffsetStateStore) else None
-        )
-
-    def close(self) -> None:
-        if self._owns_consumer:
-            self._consumer.close()
-
-    def fetch(self, watermark: Any) -> tuple[list[dict[str, Any]], Any]:
-        """Poll until ``max_messages`` or idle timeout with no new messages."""
-        del watermark  # broker-held consumer-group offsets are the cursor
-        rows: list[dict[str, Any]] = []
-        # Highest next-offset per partition for an explicit commit.
-        highwater: dict[tuple[str, int], int] = {}
+    def __iter__(self) -> Iterator[ConsumerMessage]:
+        yielded = 0
         deadline = time.monotonic() + self.idle_timeout_seconds
         idle_since: float | None = None
 
-        while len(rows) < self.max_messages and time.monotonic() < deadline:
+        while yielded < self.max_messages and time.monotonic() < deadline:
             msg = self._consumer.poll(self.poll_timeout_seconds)
             if msg is None:
-                if rows:
+                if yielded:
                     if idle_since is None:
                         idle_since = time.monotonic()
                     elif time.monotonic() - idle_since >= self.poll_timeout_seconds:
@@ -320,47 +472,24 @@ class EventsExtractor(BaseExtractor):
             idle_since = None
 
             if msg.error():
-                if msg.error().code() == KafkaError._PARTITION_EOF:  # noqa: SLF001
+                if msg.error().code() == self._KafkaError._PARTITION_EOF:  # noqa: SLF001
                     continue
-                raise KafkaException(msg.error())
+                raise self._KafkaException(msg.error())
 
-            key = (msg.topic(), msg.partition())
-            highwater[key] = msg.offset() + 1
-            rows.append(self._message_to_row(msg.value()))
+            yielded += 1
+            yield _ConfluentMessage(msg)
 
-        partitions = [
-            TopicPartition(topic, partition, offset)
-            for (topic, partition), offset in sorted(highwater.items())
-        ]
-        if self._offset_store is not None:
-            self._offset_store.set_pending(partitions)
+    def commit(self, msg: ConsumerMessage) -> None:
+        raw = getattr(msg, "_raw", None)
+        if raw is not None:
+            self._consumer.commit(message=raw, asynchronous=False)
+        else:
+            # Protocol fallback for doubles that aren't confluent messages.
+            self._consumer.commit(asynchronous=False)
 
-        return rows, partitions
-
-    def _message_to_row(self, value: bytes | None) -> dict[str, Any]:
-        """Decode one Kafka value into a payload dict.
-
-        Malformed JSON is marked so quarantine can keep the evidence — we never
-        silently drop it, and we never commit past it without handling it.
-        """
-        if value is None:
-            return {"__malformed__": True, "_raw": None, "error": "null payload"}
-        text = value.decode("utf-8", errors="replace")
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError as exc:
-            return {
-                "__malformed__": True,
-                "_raw": text,
-                "error": f"invalid json: {exc}",
-            }
-        if not isinstance(parsed, dict):
-            return {
-                "__malformed__": True,
-                "_raw": parsed,
-                "error": "payload is not a JSON object",
-            }
-        return parsed
+    def close(self) -> None:
+        if self._owns_consumer:
+            self._consumer.close()
 
 
 def consume_events(
@@ -373,28 +502,36 @@ def consume_events(
     idle_timeout_seconds: float = 5.0,
     quarantine_store: Any = None,
 ) -> ConsumeResult:
-    """Run one consume cycle: poll → stamp → bronze/quarantine → commit offsets."""
+    """Run one consume cycle via EventExtractor + ConfluentEventConsumer."""
     from stores.postgres import DsnQuarantineStore
 
-    extractor = EventsExtractor(
+    batch_id = str(uuid.uuid4())
+    consumer = ConfluentEventConsumer(
         bootstrap=bootstrap,
         topic=topic,
         group_id=group_id,
         max_messages=max_messages,
         idle_timeout_seconds=idle_timeout_seconds,
-        bronze_store=EventsBronzeStore(dsn),
-        quarantine_store=quarantine_store or DsnQuarantineStore(dsn),
-        batch_id_factory=lambda: str(uuid.uuid4()),
     )
     try:
-        result = extractor.run()
-        committed = bool(result.watermark)
+        extractor = EventExtractor(
+            consumer=consumer,
+            bronze_store=EventsBronzeStore(dsn),
+            quarantine_store=quarantine_store or DsnQuarantineStore(dsn),
+            validator=MalformedEventValidator(),
+            batch_id_factory=lambda: batch_id,
+        )
+        stats = extractor.consume(max_messages=max_messages)
         return ConsumeResult(
-            fetched=result.fetched,
-            merged=result.merged,
-            quarantined=result.quarantined,
-            batch_id=result.batch_id,
-            committed=committed,
+            fetched=stats.processed,
+            merged=stats.merged,
+            quarantined=stats.quarantined,
+            batch_id=batch_id,
+            committed=stats.committed > 0,
         )
     finally:
-        extractor.close()
+        consumer.close()
+
+
+# Back-compat alias used briefly on the VDE-18 branch.
+EventsExtractor = EventExtractor
