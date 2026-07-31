@@ -9,6 +9,7 @@ dependencies = [
     "confluent-kafka>=2.3",
     "dagster>=1.9",
     "dagster-webserver>=1.9",
+    "structlog>=24.0",
 ]
 
 [tool.dagster]

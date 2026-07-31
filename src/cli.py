@@ -5,8 +5,7 @@ Proofs:
     python -m src.cli extract files
     psql $DB -c "select reason, count(*) from bronze.quarantine group by 1"
 
-    python -m src.cli extract tmdb
-    psql $DB -c "select count(*) from bronze.film_raw"
+    python -m src.cli extract tmdb 2>&1 | jq -r 'select(.batch_id) | .batch_id' | sort -u
 
     python -m src.cli extract database
     psql $DB -c "select * from meta.watermarks"
@@ -41,6 +40,7 @@ from extractors.events import (  # noqa: E402
     produce_events,
 )
 from extractors.files import FileExtractor  # noqa: E402
+from logging_config import configure_logging, get_logger  # noqa: E402
 from stores.database import TransactionalCinemaOpsStore  # noqa: E402
 from stores.postgres import (  # noqa: E402
     DsnQuarantineStore,
@@ -49,6 +49,8 @@ from stores.postgres import (  # noqa: E402
     apply_schema_files,
     dsn_from_env,
 )
+
+logger = get_logger(__name__)
 
 
 def _repo_root() -> Path:
@@ -79,6 +81,18 @@ def _bootstrap_landing_schema(dsn: str) -> None:
         str(root / "sql" / "bronze" / "001_quarantine.sql"),
         str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
         str(root / "sql" / "001_bronze.sql"),
+    )
+
+
+def _bootstrap_tmdb_schema(dsn: str) -> None:
+    """Apply quarantine + landing watermarks + bronze.raw_tmdb DDL (idempotent)."""
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "bronze" / "001_quarantine.sql"),
+        str(root / "sql" / "bronze" / "002_quarantine_grants.sql"),
+        str(root / "sql" / "001_bronze.sql"),
+        str(root / "sql" / "bronze" / "005_raw_tmdb.sql"),
     )
 
 
@@ -136,10 +150,12 @@ def cmd_extract_files(args: argparse.Namespace) -> int:
         quarantine_store=DsnQuarantineStore(dsn),
     )
     result = extractor.run()
-    print(
-        f"source={extractor.source} fetched={result.fetched} "
-        f"merged={result.merged} quarantined={result.quarantined} "
-        f"batch_id={result.batch_id}"
+    logger.info(
+        "cli.result",
+        fetched=result.fetched,
+        merged=result.merged,
+        quarantined=result.quarantined,
+        batch_id=result.batch_id,
     )
     return 0
 
@@ -160,41 +176,52 @@ def cmd_extract_database(args: argparse.Namespace) -> int:
             quarantine_store=DsnQuarantineStore(dsn),
         )
         result = extractor.run()
-    print(
-        f"source={extractor.source} fetched={result.fetched} "
-        f"merged={result.merged} quarantined={result.quarantined} "
-        f"watermark={result.watermark} batch_id={result.batch_id}"
+    logger.info(
+        "cli.result",
+        fetched=result.fetched,
+        merged=result.merged,
+        quarantined=result.quarantined,
+        watermark=str(result.watermark) if result.watermark is not None else None,
+        batch_id=result.batch_id,
     )
     return 0
 
 
-def cmd_extract_tmdb(_args: argparse.Namespace) -> int:
-    """Run the TMDB extractor end-to-end.
+def cmd_extract_tmdb(args: argparse.Namespace) -> int:
+    """Run the TMDB extractor end-to-end into ``bronze.raw_tmdb``."""
+    from extractors.tmdb import TMDBExtractor
 
-    Requires ``TMDB_API_KEY`` and a wired bronze/state store (see Day-1 DB issues).
-    Until those land, unit tests in ``tests/extractors/test_tmdb.py`` are the CI proof.
-    """
     _load_dotenv()
     api_key = os.environ.get("TMDB_API_KEY", "").strip()
     if not api_key:
-        print("TMDB_API_KEY is not set (add it to .env)", file=sys.stderr)
+        logger.error("cli.config_error", error="TMDB_API_KEY is not set (add it to .env)")
         return 2
 
-    db = os.environ.get("DB") or os.environ.get("DATABASE_URL")
-    if not db:
-        print(
-            "DB / DATABASE_URL is not set — cannot land into bronze.film_raw yet.\n"
-            "CI proof: python -m pytest tests/extractors/test_tmdb.py -q",
-            file=sys.stderr,
-        )
+    try:
+        dsn = dsn_from_env()
+    except RuntimeError as exc:
+        logger.error("cli.config_error", error=str(exc))
         return 2
 
-    print(
-        "TMDB extractor is implemented (TMDBExtractor.fetch); "
-        "Postgres store wiring is not in this change set.",
-        file=sys.stderr,
+    if not args.skip_schema:
+        _bootstrap_tmdb_schema(dsn)
+
+    extractor = TMDBExtractor(
+        api_key=api_key,
+        state_store=LandingStateStore(dsn),
+        bronze_store=LandingBronzeStore(dsn, table="bronze.raw_tmdb"),
+        quarantine_store=DsnQuarantineStore(dsn),
     )
-    return 2
+    result = extractor.run()
+    logger.info(
+        "cli.result",
+        fetched=result.fetched,
+        merged=result.merged,
+        quarantined=result.quarantined,
+        watermark=str(result.watermark) if result.watermark is not None else None,
+        batch_id=result.batch_id,
+    )
+    return 0
 
 
 def cmd_produce_events(args: argparse.Namespace) -> int:
@@ -211,9 +238,12 @@ def cmd_produce_events(args: argparse.Namespace) -> int:
         late_rate=args.late_rate,
         start_seq=args.start_seq,
     )
-    print(
-        f"produced={result.produced} malformed={result.malformed} "
-        f"topic={result.topic} bootstrap={bootstrap}"
+    logger.info(
+        "cli.result",
+        produced=result.produced,
+        malformed=result.malformed,
+        topic=result.topic,
+        bootstrap=bootstrap,
     )
     return 0
 
@@ -242,13 +272,17 @@ def cmd_consume_events(args: argparse.Namespace) -> int:
             dlq_topic=args.dlq,
         )
     except KeyboardInterrupt:
-        print("interrupted", flush=True)
+        logger.warning("cli.interrupted")
         return 130
-    print(
-        f"source=ticketing fetched={result.fetched} merged={result.merged} "
-        f"quarantined={result.quarantined} dead_lettered={result.dead_lettered} "
-        f"committed={result.committed} "
-        f"duplicates={result.duplicates} batch_id={result.batch_id}"
+    logger.info(
+        "cli.result",
+        fetched=result.fetched,
+        merged=result.merged,
+        quarantined=result.quarantined,
+        dead_lettered=result.dead_lettered,
+        committed=result.committed,
+        duplicates=result.duplicates,
+        batch_id=result.batch_id,
     )
     return 0
 
@@ -274,6 +308,11 @@ def build_parser() -> argparse.ArgumentParser:
     files.set_defaults(func=cmd_extract_files)
 
     tmdb = extract_sub.add_parser("tmdb", help="Pull TMDB film metadata into bronze")
+    tmdb.add_argument(
+        "--skip-schema",
+        action="store_true",
+        help="Do not bootstrap quarantine/raw_tmdb DDL before extracting",
+    )
     tmdb.set_defaults(func=cmd_extract_tmdb)
 
     database = extract_sub.add_parser(
@@ -384,6 +423,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    configure_logging(json_logs=True)
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
