@@ -1,0 +1,16 @@
+# Local profile matching docker-compose.yml (ADR-010).
+# Override with DBT_* env vars or point DBT_PROFILES_DIR elsewhere.
+cinema_ops:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('DBT_HOST', 'localhost') }}"
+      port: "{{ env_var('DBT_PORT', '5432') | int }}"
+      user: "{{ env_var('DBT_USER', 'cinema') }}"
+      password: "{{ env_var('DBT_PASSWORD', 'cinema') }}"
+      dbname: "{{ env_var('DBT_DBNAME', 'cinema_ops') }}"
+      schema: silver
+      threads: 2
+      keepalives_idle: 0
+      search_path: "silver,public"
