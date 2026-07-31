@@ -19,6 +19,10 @@ storage/
 logs/
 compute_logs/
 
+# agent-api (VDE-38)
+agent-api/node_modules/
+agent-api/dist/
+
 # dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/
 dbt/logs/

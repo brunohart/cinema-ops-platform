@@ -410,6 +410,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#8](https://github.com/brunohart/cinema-ops-platform/pull/8) | VDE-17 | `cinema_ops` clock skew — `SAFETY_LAG` overlap on incremental reads | in flight |
 | [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | in flight |
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
+| — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 
 ### Specified, not yet built
 
@@ -452,8 +453,11 @@ sql/
   init/001_schemas.sql     bronze · silver · gold
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
+  init/005_api_role.sql    SELECT-only api role over gold allow-list
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
+
+agent-api/                 Hono read path — fixed endpoints, connects as api
 
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors

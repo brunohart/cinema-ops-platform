@@ -22,6 +22,8 @@ services:
       - ./sql/bronze/005_raw_tmdb.sql:/docker-entrypoint-initdb.d/035_raw_tmdb.sql:ro
       - ./sql/bronze/005_film_raw.sql:/docker-entrypoint-initdb.d/035_film_raw.sql:ro
       - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
+      # VDE-38 — read-only api role over gold (agent-api connects as this, not cinema)
+      - ./sql/init/005_api_role.sql:/docker-entrypoint-initdb.d/050_api_role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
