@@ -6,10 +6,10 @@
 
 [![status](https://img.shields.io/badge/status-in%20build-E0B24C?style=flat-square&labelColor=15191F)](#build-log--what-exists-today)
 [![layers](https://img.shields.io/badge/layers-bronze%20%E2%86%92%20silver%20%E2%86%92%20gold-C08B4F?style=flat-square&labelColor=15191F)](#the-shape-of-the-thing)
-[![stack](https://img.shields.io/badge/stack-Postgres%2016%20%C2%B7%20dbt%20%C2%B7%20Dagster%20%C2%B7%20Redpanda-8C97A3?style=flat-square&labelColor=15191F)](DECISIONS.md)
+[![stack](https://img.shields.io/badge/stack-Postgres%20%C2%B7%20dbt%20%C2%B7%20Dagster%20%C2%B7%20Redpanda-8C97A3?style=flat-square&labelColor=15191F)](DECISIONS.md)
 [![python](https://img.shields.io/badge/python-3.11%2B-8C97A3?style=flat-square&labelColor=15191F)](pyproject.toml)
 [![PII](https://img.shields.io/badge/PII-absent%2C%20not%20redacted-4E8C63?style=flat-square&labelColor=15191F)](#governance-the-part-that-is-structural)
-[![agent interface](https://img.shields.io/badge/agent%20interface-bounded%20tool%20set-4E8C63?style=flat-square&labelColor=15191F)](DECISIONS.md#adr-009--the-agent-interface-is-a-fixed-tool-set-over-gold-not-a-sql-endpoint)
+[![agent](https://img.shields.io/badge/agent-bounded%20tool%20set-4E8C63?style=flat-square&labelColor=15191F)](DECISIONS.md#adr-009--the-agent-interface-is-a-fixed-tool-set-over-gold-not-a-sql-endpoint)
 
 </div>
 
