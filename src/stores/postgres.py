@@ -140,7 +140,3 @@ def dsn_from_env(env: dict[str, str] | None = None) -> str:
     if dsn.startswith("postgres://"):
         dsn = "postgresql://" + dsn[len("postgres://") :]
     return dsn
-
-
-def dumps_payload(payload: Any) -> str:
-    return json.dumps(payload, sort_keys=True, default=str)
