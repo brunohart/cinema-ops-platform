@@ -1,6 +1,7 @@
 """Extractors — source ingestion into bronze."""
 
 from extractors.base import BaseExtractor, ExtractorResult, RetryPolicy
+from extractors.cinema_ops import SAFETY_LAG, since_with_safety_lag
 from extractors.database import DatabaseExtractor
 from extractors.events import (
     EventExtractor,
@@ -29,7 +30,9 @@ __all__ = [
     "PostgresQuarantineStore",
     "PostgresStateStore",
     "RetryPolicy",
+    "SAFETY_LAG",
     "TMDBExtractor",
     "consume_events",
     "produce_events",
+    "since_with_safety_lag",
 ]

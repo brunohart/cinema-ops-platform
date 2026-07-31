@@ -3,7 +3,7 @@
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
 **Last revised:** 2026-07-31
-**Revision count:** 4
+**Revision count:** 5
 
 ---
 
@@ -82,6 +82,30 @@ Failure modes I can name, have decided not to handle in this build, and can defe
 | `cinema_ops` | hard deletes — a row vanishes with nothing to detect it by | source system is append-mostly for the tables in scope | periodic full reconciliation, or CDC instead of watermark reads |
 | ticketing events | out-of-order arrival across partitions | event ordering is not load-bearing for the facts modelled here | event-time windowing with a lateness allowance |
 | landing files | partial file read — file consumed while still being written | _(unfilled — see section 8)_ | atomic rename / marker file convention with the producer |
+
+### 2c. The three clocks — why `cinema_ops` re-reads five minutes
+
+An incremental read on a business-time watermark looks correct until you notice there are three
+clocks, not one. The row carries a **business timestamp** (when the booking happened). The source
+database makes the row visible at **commit time** (when the transaction ended). This pipeline's
+**watermark** records how far a successful bronze write has read. Those three are not the same
+instant, and the gap between them is silent.
+
+A long-running source transaction can commit *after* a run has already advanced the watermark past
+the row's business timestamp. The next run starts at the watermark, so the row is never selected
+again — and nothing anywhere errors, because every query succeeded and every watermark write was
+honest about what that run saw. Lost data with a green exit code.
+
+The fix is deliberate overlap: every `cinema_ops` incremental read subtracts a safety lag from the
+stored high watermark before querying (`SAFETY_LAG = timedelta(minutes=5)` in
+`src/extractors/cinema_ops.py`, so `since = high_water - SAFETY_LAG`). That reprocesses roughly five
+minutes of rows every run. It is only safe because the bronze write is a merge on a deterministic
+key — overlap plus idempotency means no gap and no duplicates (ADR-006).
+
+Five minutes is a **guess**. The number that should replace it is the maximum observed source
+transaction duration (commit time minus business time) over a representative operating window —
+once that distribution is measured, set the lag above the observed max with headroom, and retire
+the guess. Until then Q3 in section 8 stays open.
 
 ---
 
@@ -471,7 +495,7 @@ go and find a question rather than to celebrate.
 |---|----------|----------------|-------------------|--------|
 | Q1 | Does the landing-file producer write atomically, or can a partial file be read? | determines whether section 2b row 4 is a real risk or a non-issue | inspect a drop mid-write; ask the producer | open |
 | Q2 | What is the actual duplicate rate on the ticketing topic under normal operation? | if it's zero in practice, the idempotency is untested rather than proven | log duplicate rate per run for a week | open |
-| Q3 | How late is "late" for `cinema_ops` — what overlap window is actually needed? | the window is currently a guess; too short loses data, too long costs reads | measure commit-time vs business-time skew over a real day | open |
+| Q3 | How late is "late" for `cinema_ops` — what overlap window is actually needed? | `SAFETY_LAG` is currently a 5-minute guess (section 2c); too short loses data, too long costs reads | measure max observed source transaction duration (commit − business time) over a real operating day; set lag above that max | open — guess committed, measurement pending |
 | Q4 | What is the real drop cadence for landing files? | the 6 h freshness promise in section 5a is `est.` with no measurement behind it | log file mtimes for a week and take the 95th percentile gap | open |
 | Q5 | Where does "expected row count" come from for the completeness check? | a completeness SLA with no independent expectation to compare against is unmeasurable | source-side count query per batch window, or a manifest from the producer | open |
 
