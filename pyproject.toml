@@ -3,13 +3,16 @@ name = "cinema-ops-platform"
 version = "0.1.0"
 description = "AI-native data pipelines for a cinema operations platform"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pydantic>=2.0",
+    "psycopg[binary]>=3.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 addopts = ["--import-mode=importlib"]
 
