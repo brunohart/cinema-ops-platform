@@ -340,6 +340,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | four extractors are Dagster assets; lineage edges are function-argument deps | `./scripts/prove_dagster_assets.sh` then `dagster dev -w workspace.yaml` | [recorded](docs/2026-07-31-vde-22-dagster-assets.md) — 10 assets, 9 edges |
 | silver models type, rename, and dedupe bronze on natural key | `./scripts/prove-silver.sh` | [recorded](docs/2026-07-31-vde-24-silver-proof.md) — `PASS=12` |
 | gold star schema — dims with surrogates, facts with keys + measures only; zero orphan `film_key` | `./scripts/prove-gold.sh` | [recorded](docs/2026-07-31-vde-25-gold-proof.md) — `PASS=35`, orphans `0` |
+| MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -461,6 +462,8 @@ dbt/
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
+mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
+evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls

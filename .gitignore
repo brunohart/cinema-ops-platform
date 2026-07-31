@@ -28,3 +28,11 @@ transform/target/
 transform/dbt_packages/
 transform/logs/
 transform/.user.yml
+
+# MCP / Promptfoo (VDE-47)
+node_modules/
+mcp/node_modules/
+dist/
+evals/results.json
+evals/output/
+.promptfoo/
