@@ -1,0 +1,15 @@
+{
+  "name": "@cinema-ops/agent-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bounded, read-only agent tool queries over gold — PII absent, not redacted",
+  "type": "module",
+  "main": "src/queries.ts",
+  "exports": {
+    "./queries": "./src/queries.ts",
+    "./schemas": "./src/schemas.ts"
+  },
+  "scripts": {
+    "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh"
+  }
+}
