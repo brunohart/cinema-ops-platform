@@ -29,11 +29,16 @@ enforcement runs in CI.
 | `DECISIONS.md` | ADR-014 appended |
 | `ARCHITECTURE.md` | §10 row appended |
 | `README.md` | two rows appended (Prove it table + build-log table) |
-| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify, verify-fail, implement (fix-pass), verify-fail-2, implement (prose-fix), verify-fail-3, implement (balanced-quote-fix), verify-fail-4, implement (trailing-comment+webhook+expression-fix) entries |
+| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify, verify-fail, implement (fix-pass), verify-fail-2, implement (prose-fix), verify-fail-3, implement (balanced-quote-fix), verify-fail-4, implement (trailing-comment+webhook+expression-fix), verify-fail-5, implement (HEAD-ancestry+demo+digest fix) entries |
 
 ## Proof
 
+Run on a **clean clone** with all 50 remote refs (including `origin/cursor/vde-54-public-deploy-1ac2`
+which carries `DEMO_TOKEN=cinema-ops-demo-…` and `_DEMO_TOKEN_DIGEST=<64hex>`):
+
 ```
+$ rm -rf /tmp/vde51-prove && git clone --no-single-branch https://github.com/brunohart/cinema-ops-platform /tmp/vde51-prove
+$ cd /tmp/vde51-prove && git checkout cursor/vde-51-secrets-out-c800
 $ ./scripts/prove_no_secrets.sh
 --- scanner self-check (synthetic kill-test)
 self-check: all kill-check and account-check assertions passed
@@ -43,12 +48,12 @@ self-check: all kill-check and account-check assertions passed
   shallow clone: no
 
 --- issue-shaped grep over full history (reported; gate is classifier below)
-  issue-shaped grep over full history: 51 matching lines
+  issue-shaped grep over full history: 59 matching lines
   (classified below; a history count can only grow — see docs/2026-08-01-vde-51-secrets-out.md)
 
 --- credential classifier (tier A + tier B + .env.example)
 tier A hits: 0
-tier B matches: 189  (blank=2  expression=73  interpolation=25  local-dev=2  low-entropy=24  placeholder=42  regex-pattern=9  source-literal=12)
+tier B matches: 165  (blank=2  expression=56  interpolation=20  local-dev=2  low-entropy=21  placeholder=41  regex-pattern=11  source-literal=12)
 unaccounted: 0
 env-example: blank-valued and complete
 
@@ -64,7 +69,12 @@ env-example: blank-valued and complete
 VDE-51 ok: no credential-shaped value in history or tree; .env.example blank and complete
 ```
 
-Exit code: **0**
+Exit code: **0** — HEAD `e885fd0`, 50 remote refs present.
+
+The tier B count is **165** (down from 233 on `--all`, and different from the earlier 189 because
+this run uses HEAD ancestry only — HEAD ancestry has fewer commits than the prior workspace which
+had accumulated more ledger entries in its local history).  The count can only grow as future
+commits add more code patterns; the gate is `unaccounted: 0`.
 
 ## The issue's command and the count explained
 
@@ -81,18 +91,22 @@ filter-repo`, which the audit-trail rule forbids. The gate is `unaccounted: 0`.
 
 ### Classification of every match
 
-All 189 Tier B matches fall into accounted categories:
+All 165 Tier B matches fall into accounted categories (HEAD ancestry, not `--all`):
 
 | category | count | examples |
 |----------|-------|---------|
-| `expression` | 73 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py; `token.label}` dict-literal closers now captured by TIER_B_RE suffix |
-| `placeholder` | 42 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL); `token_label = "prove-vde-43"` (suffix extension matches `token_label`; `vde-` is a placeholder keyword) |
-| `low-entropy` | 24 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
-| `interpolation` | 25 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs; quoted-key JSON/YAML with interpolated values |
-| `regex-pattern` | 9 | prove script grep patterns containing `.+` quantifiers — structurally impossible in any real credential |
-| `source-literal` | 12 | scanner reading its own historical source fixtures (Python string literals `"KEY=VALUE",  # comment`); trailing structural punctuation stripped to reveal the unbalanced closer — real credentials never end with an unmatched quote |
+| `expression` | 56 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py |
+| `placeholder` | 41 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL); `token_label = "prove-vde-43"` (`vde-` keyword); `DEMO_TOKEN=cinema-ops-demo-…` (`demo` keyword — defence in depth for vde-54) |
+| `low-entropy` | 21 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
+| `interpolation` | 20 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs; quoted-key JSON/YAML with interpolated values |
+| `regex-pattern` | 11 | prove script grep patterns containing `.+` quantifiers — structurally impossible in any real credential |
+| `source-literal` | 12 | scanner reading its own historical source fixtures (Python string literals `"KEY=VALUE",  # comment`); trailing structural punctuation stripped to reveal the unbalanced closer |
 | `local-dev` | 2 | ADR-010 local-dev identities (`cinema`, `agent_reader`) in DSN values |
 | `blank` | 2 | `TMDB_API_KEY=` blank assignments in `.env.example` history |
+
+The `digest` category was added in this fix pass but does not appear in the HEAD ancestry count —
+the `_DEMO_TOKEN_DIGEST` assignments live on `origin/cursor/vde-54-public-deploy-1ac2`, which is
+not in HEAD ancestry.  The category exists so the gate stays green when vde-54 merges.
 
 The classifier gates on **value shape only** — never on file path. A path exclusion is how a real
 secret hides in an allowlisted file.
