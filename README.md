@@ -4,6 +4,7 @@
 
 <br>
 
+[![CI](https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml)
 [![status](https://img.shields.io/badge/status-in%20build-E0B24C?style=flat-square&labelColor=15191F)](#build-log--what-exists-today)
 [![layers](https://img.shields.io/badge/layers-bronze%20%E2%86%92%20silver%20%E2%86%92%20gold-C08B4F?style=flat-square&labelColor=15191F)](#the-shape-of-the-thing)
 [![stack](https://img.shields.io/badge/stack-Postgres%20%C2%B7%20dbt%20%C2%B7%20Dagster%20%C2%B7%20Redpanda-8C97A3?style=flat-square&labelColor=15191F)](DECISIONS.md)
@@ -349,6 +350,10 @@ pytest -q                       # the whole suite
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 | `docker compose up` from a clean clone seeds gold (`fct_booking count > 0`); db+redpanda+seed+dagster+agent-tools all healthy | `./scripts/prove_clean_clone.sh` | [recorded](docs/2026-08-01-vde-49-clean-clone-compose.md) — `PROOF OK`, `fct_booking_rows=2` |
+| MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
+| the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
+| no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
+
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -422,11 +427,15 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
+| — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
 | — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
+| [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
+| [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 
-That last row is the only one with no issue id, and it stays visibly empty rather than being filled
-in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
+
+The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
+with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
 there was no issue to trace it to. The trail records the gap.
 
 ### How the work gets done — plan, implement, verify
@@ -445,6 +454,7 @@ into every delegation, the model that *actually* ran each phase is recorded from
 input rather than the agent's word, and a run that changed the repository cannot finish while any of
 the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
 with nothing installed but Python and git.
+
 
 ### Specified, not yet built
 
@@ -493,15 +503,22 @@ sql/
   meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
+  init/005_agent_role.sql  SELECT-only agent role; no grant on dim_customer PII
+  init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
   seed/                    bronze seed rows loaded at initdb (bookings, films, etc.)
+
+agent-api/                 allowlisted queries + Hono read path (no SQL door)
 
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors
   models/silver/           stg_* — typed, renamed, deduped on natural key
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
+
+mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
+evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 
 scripts/
   seed_platform.sh         runs inside the compose seed service: dagster job execute

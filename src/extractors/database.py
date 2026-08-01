@@ -16,6 +16,9 @@ import psycopg
 from psycopg.rows import dict_row
 
 from extractors.base import BaseExtractor
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 SOURCE_NAME = "cinema_ops"
 DEFAULT_SOURCE_TABLE = "cinema_ops.bookings"
