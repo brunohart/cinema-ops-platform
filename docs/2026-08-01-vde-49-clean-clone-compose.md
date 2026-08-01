@@ -15,11 +15,12 @@ A fresh `git clone` of this repository, followed by `cp .env.example .env` and
 - `db` service: healthy (Postgres 16-alpine, DDL applied at initdb)
 - `redpanda` service: healthy
 - `redpanda-init` service: exited 0 (topics created)
-- `seed` service: exited 0 — ran `dagster job execute cinema_ops_transform` (dbt
-  silver + gold transforms over SQL-seeded bronze) — fct_booking count > 0
-- `dagster` service: started (healthy within ~30 s of seed completing)
-- `agent-tools` service: started (healthy within ~30 s of seed completing)
+- `seed` service: exited 0 — ran `dagster job execute -m orchestration.definitions -j cinema_ops_transform`
+  (dbt silver + gold transforms over SQL-seeded bronze) — logged `RUN_SUCCESS` and `SEED OK (dagster path)`
+- `dagster` service: healthy (polled to healthy before PROOF OK)
+- `agent-tools` service: healthy (polled to healthy before PROOF OK)
 - `SELECT count(*) FROM gold.fct_booking` returns **2** (both exec and host psql agree)
+- Grain check passes: rows=2 grain_keys=2 (no duplicate booking_id)
 
 The rows are dbt's **B-GOLD-1** and **B-GOLD-2** (not the initdb fixture B-100/B-101). The
 `fct_booking` table is materialized by dbt as a new table (`materialized='table'`), which
@@ -29,30 +30,11 @@ that skips the INSERT when `booking_fee` column doesn't exist (VDE-49 step 10).
 
 ---
 
-## Captured proof output (abridged)
+## Captured proof output
 
 ```
-==> ensure Docker bridge forwarding rules are in place
-==> clone HEAD to /tmp/strangertest-vde49-211971
-Cloning into '/tmp/strangertest-vde49-211971'...
-==> cp .env.example .env
-==> docker compose -p vde49clean up -d --build
-...
- seed  Built
- Network vde49clean_default  Created
- Volume vde49clean_dagster_home  Created
- Container vde49clean-redpanda-1  Started
- Container vde49clean-db-1  Started
- Container vde49clean-db-1  Healthy
- Container vde49clean-seed-1  Starting
- Container vde49clean-seed-1  Started
- Container vde49clean-redpanda-1  Healthy
- Container vde49clean-redpanda-init-1  Started
- Container vde49clean-seed-1  Exited
- Container vde49clean-dagster-1  Started
- Container vde49clean-agent-tools-1  Started
 ==> poll for db healthy + seed exited 0 (max 600s)
-  04:42:05 db=healthy seed=exited(exit=0)
+  05:07:19 db=healthy seed=exited(exit=0)
 
 ==> compose ps
 NAME                       IMAGE                   SERVICE       STATUS
@@ -68,17 +50,47 @@ vde49clean-redpanda-1      redpanda:v24.2.4        redpanda      Up (healthy)   
   fct_booking rows (host): 2
 
 ==> grain check (inside db container)
-       check       | rows | grain_keys
--------------------+------+------------
- fct_booking grain |    2 |          2
+  fct_booking grain: rows=2 grain_keys=2
+
+==> poll dagster and agent-tools to healthy (max 120s)
+  05:07:19 dagster=starting agent-tools=starting
+  05:07:24 dagster=starting agent-tools=healthy
+  05:07:30 dagster=starting agent-tools=healthy
+  05:07:35 dagster=healthy agent-tools=healthy
+
+==> seed log — assert dagster path
+seed-1  | ==> fix agent_reader password
+seed-1  | ==> dagster job execute cinema_ops_transform (dbt silver + gold)
+seed-1  | 2026-08-01 05:07:18 +0000 - dagster - DEBUG - cinema_ops_transform - 0e03d974-d461-43df-8770-b79475654ccf - 8 - RUN_SUCCESS - Finished execution of run for "cinema_ops_transform".
+seed-1  | SEED OK (dagster path)
+seed-1  | ==> re-apply agent role grants (covers dbt-created tables)
+seed-1  | ==> verify agent_reader kill-test
+seed-1  | ==> assert gold.fct_booking count > 0
+seed-1  | fct_booking_rows=2
 
 ==> second pass without .env (data persists; host psql uses explicit port)
   fct_booking rows (no .env): 2
 
 PROOF OK
   fct_booking_rows=2
-  db: healthy  seed: exited 0  redpanda: healthy (via compose ps above)
+  db: healthy  seed: exited 0  grain: rows=2 grain_keys=2  dagster: healthy  agent-tools: healthy
 ```
+
+---
+
+## Note: dagster job execute flag (-m not -w)
+
+`dagster job execute` takes `-m <module>` (Python module path) plus `-j <job>`.
+The `-w` flag belongs to `dagster dev` only and is rejected by `job execute`.
+In a previous implementation pass, `seed_platform.sh` used `-w workspace.yaml`,
+which caused every Dagster invocation to fail with `Error: No such option: -w`.
+The silent dbt fallback (`|| dbt build`) masked this failure and printed
+`SEED OK (dbt fallback path)` — making the proof appear green while Dagster never ran.
+
+The fix: `dagster job execute -m orchestration.definitions -j cinema_ops_transform`
+(confirmed exit 0 with `RUN_SUCCESS` above). The dbt fallback has been removed.
+The proof now asserts `grep -q 'SEED OK (dagster path)'` on the seed log, so a
+fallback path cannot green the proof.
 
 ---
 
