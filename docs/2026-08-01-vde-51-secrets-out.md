@@ -43,12 +43,12 @@ self-check: all kill-check and account-check assertions passed
   shallow clone: no
 
 --- issue-shaped grep over full history (reported; gate is classifier below)
-  issue-shaped grep over full history: 36 matching lines
+  issue-shaped grep over full history: 40 matching lines
   (classified below; a history count can only grow — see docs/2026-08-01-vde-51-secrets-out.md)
 
 --- credential classifier (tier A + tier B + .env.example)
 tier A hits: 0
-tier B matches: 124  (blank=2  expression=47  interpolation=17  local-dev=2  low-entropy=22  placeholder=15  regex-pattern=9  source-literal=10)
+tier B matches: 130  (blank=2  expression=48  interpolation=17  local-dev=2  low-entropy=27  placeholder=15  regex-pattern=9  source-literal=10)
 unaccounted: 0
 env-example: blank-valued and complete
 
@@ -74,20 +74,20 @@ The issue-shaped command:
 git log -p | grep -ncE "api[_-]?key=.+|password=.+|xoxb-|hooks.slack.com/services/"
 ```
 
-returned **36** matching lines as of the commit this proof was captured against. That number is
+returned **40** matching lines as of the commit this proof was captured against. That number is
 **not the gate** — a history-based count can only grow: blanking `.env.example` added lines to
 the diff, and later fix-pass commits add more. Anyone chasing zero would reach for `git
 filter-repo`, which the audit-trail rule forbids. The gate is `unaccounted: 0`.
 
 ### Classification of every match
 
-All 124 Tier B matches fall into accounted categories:
+All 130 Tier B matches fall into accounted categories:
 
 | category | count | examples |
 |----------|-------|---------|
-| `expression` | 47 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py |
+| `expression` | 48 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py |
 | `placeholder` | 15 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL, `.../` path can't match Tier A) |
-| `low-entropy` | 22 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
+| `low-entropy` | 27 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
 | `interpolation` | 17 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs; quoted-key JSON/YAML with interpolated values |
 | `regex-pattern` | 9 | prove script grep patterns containing `.+` quantifiers — structurally impossible in any real credential |
 | `source-literal` | 10 | scanner reading its own historical source fixtures (Python string literals `"KEY=VALUE",  # comment`); first token has unbalanced closer — real credentials never end with an unmatched quote |
