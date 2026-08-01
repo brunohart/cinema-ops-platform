@@ -2,10 +2,13 @@
   "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Allowlisted agent read path + Hono HTTP surface over gold (VDE-38 / VDE-39 / VDE-42 / ADR-009)",
+  "description": "Allowlisted agent read path — Hono HTTP (VDE-38), QUERIES (VDE-39), MCP tools (VDE-40), PII-absent shapes (VDE-42)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "cinema-ops-mcp": "./dist/mcp.js"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./queries": "./dist/queries.js",
@@ -16,21 +19,25 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch server/index.ts",
     "start": "tsx server/index.ts",
+    "mcp": "node dist/mcp.js",
     "prove": "bash ../scripts/prove_allowlisted_queries.sh",
+    "prove:mcp": "bash ../scripts/prove_mcp.sh",
     "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh",
-    "prove-http": "bash ../scripts/prove-agent-api.sh"
+    "prove-http": "bash ../scripts/prove-agent-api.sh",
+    "inspector": "npm run build && npx @modelcontextprotocol/inspector node dist/mcp.js"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
     "@hono/node-server": "^1.14.4",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "hono": "^4.8.5",
-    "postgres": "^3.4.7",
+    "postgres": "^3.4.9",
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@types/node": "^22.16.5",
+    "@types/node": "^22.20.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3"
   }
