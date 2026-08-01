@@ -52,34 +52,59 @@ def _jsonable(value: Any) -> Any:
 def get_site_performance(
     conn: psycopg.Connection,
     site_ids: Sequence[int],
+    *,
+    limit: int | None = None,
 ) -> dict[str, Any]:
     """Site daily performance for the *bound* site_ids only.
 
     ``site_ids`` must already be the intersection with the token's scope —
     this function does not re-check authorisation; it binds what it is given.
+
+    Optional ``limit`` (VDE-44) clips the result and sets ``truncated``.
     """
     bound = [int(s) for s in site_ids]
     if not bound:
-        return {"tool": GET_SITE_PERFORMANCE, "site_ids": [], "rows": []}
+        body: dict[str, Any] = {
+            "tool": GET_SITE_PERFORMANCE,
+            "site_ids": [],
+            "rows": [],
+        }
+        if limit is not None:
+            body["truncated"] = False
+            body["limit"] = limit
+        return body
 
     cols = ", ".join(_SITE_PERFORMANCE_COLUMNS)
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(
-            f"""
+    # Fetch limit+1 when capped so truncated can be labelled without COUNT(*).
+    fetch_sql = f"""
             SELECT {cols}
               FROM gold.site_performance
              WHERE site_id = ANY(%s)
              ORDER BY site_id, show_date
-            """,
-            (bound,),
-        )
+            """
+    params: list[Any] = [bound]
+    if limit is not None:
+        fetch_sql += " LIMIT %s"
+        params.append(int(limit) + 1)
+
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(fetch_sql, params)
         rows = cur.fetchall()
 
-    return {
+    truncated = False
+    if limit is not None and len(rows) > limit:
+        truncated = True
+        rows = rows[:limit]
+
+    body = {
         "tool": GET_SITE_PERFORMANCE,
         "site_ids": bound,
         "rows": [{k: _jsonable(r[k]) for k in _SITE_PERFORMANCE_COLUMNS} for r in rows],
     }
+    if limit is not None:
+        body["truncated"] = truncated
+        body["limit"] = limit
+    return body
 
 
 # ---------------------------------------------------------------------------

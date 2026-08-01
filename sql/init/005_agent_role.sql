@@ -4,6 +4,9 @@
 --   2. response type has no PII field
 --   3. this role holds no SELECT grant on dim_customer PII columns
 --
+-- VDE-44 — every agent session also carries statement_timeout = 5s so a
+-- careless question cannot pin the database. The ceiling is not overridable.
+--
 -- Password is set at provision time, never committed:
 --   ALTER ROLE agent PASSWORD '...';
 
@@ -16,6 +19,9 @@ BEGIN
   END IF;
 END
 $$;
+
+-- Per-connection budget — also SET on connect in the tools server (belt + braces).
+ALTER ROLE agent SET statement_timeout = '5s';
 
 GRANT USAGE ON SCHEMA gold TO agent;
 
