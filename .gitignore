@@ -1,5 +1,9 @@
 .DS_Store
 .claude/
+
+# Per-run state for the pipeline hooks (.cursor/hooks/pipeline_hook.py). The durable record is
+# docs/agent-ledger/ledger.jsonl; this is scratch.
+.cursor/.runs/
 __pycache__/
 
 # agent-api (VDE-39)
@@ -25,9 +29,10 @@ storage/
 logs/
 compute_logs/
 
-# agent-api (VDE-38 / VDE-39)
-agent-api/node_modules/
-agent-api/dist/
+# promptfoo local artefacts (VDE-48)
+.promptfoo/
+evals/output/
+promptfoo-*.json
 
 # dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/
