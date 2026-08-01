@@ -143,6 +143,19 @@ Five pre-existing findings fixed with `ruff check --fix .` — no behavior chang
 
 After this fix, a subsequent push should show ruff green in the `lint` job; only the VDE-11 unit failures remain by design.
 
+### Confirmed follow-up run 30683958870
+
+**URL:** https://github.com/brunohart/cinema-ops-platform/actions/runs/30683958870
+
+| job | verdict | notes |
+|---|---|---|
+| `integration` | **success** | dbt build + guard + idempotency + testcontainers green |
+| `lint` | **failure** (expected) | **ruff success**, **mypy success**, unit step red only on the two VDE-11 immutability tests |
+
+```
+2 failed, 144 passed, 4 skipped, 1 deselected
+```
+
 ---
 
 ## What the verifier should look hardest at
