@@ -25,11 +25,6 @@ storage/
 logs/
 compute_logs/
 
-# promptfoo local artefacts (VDE-48)
-.promptfoo/
-evals/output/
-promptfoo-*.json
-
 # dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/
 dbt/logs/
@@ -40,10 +35,12 @@ transform/dbt_packages/
 transform/logs/
 transform/.user.yml
 
-# MCP / Promptfoo (VDE-47)
+# MCP / Promptfoo (VDE-47 eval suite, VDE-48 red-team)
 node_modules/
 mcp/node_modules/
 dist/
-evals/results.json
-evals/output/
 .promptfoo/
+evals/output/
+evals/results.json
+promptfoo-*.json
+
