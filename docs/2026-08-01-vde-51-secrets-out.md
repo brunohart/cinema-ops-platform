@@ -29,7 +29,7 @@ enforcement runs in CI.
 | `DECISIONS.md` | ADR-014 appended |
 | `ARCHITECTURE.md` | §10 row appended |
 | `README.md` | two rows appended (Prove it table + build-log table) |
-| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify, verify-fail, implement (fix-pass), verify-fail-2, implement (prose-fix), verify-fail-3, implement (balanced-quote-fix) entries |
+| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify, verify-fail, implement (fix-pass), verify-fail-2, implement (prose-fix), verify-fail-3, implement (balanced-quote-fix), verify-fail-4, implement (trailing-comment+webhook+expression-fix) entries |
 
 ## Proof
 
@@ -43,12 +43,12 @@ self-check: all kill-check and account-check assertions passed
   shallow clone: no
 
 --- issue-shaped grep over full history (reported; gate is classifier below)
-  issue-shaped grep over full history: 40 matching lines
+  issue-shaped grep over full history: 45 matching lines
   (classified below; a history count can only grow — see docs/2026-08-01-vde-51-secrets-out.md)
 
 --- credential classifier (tier A + tier B + .env.example)
 tier A hits: 0
-tier B matches: 130  (blank=2  expression=48  interpolation=17  local-dev=2  low-entropy=27  placeholder=15  regex-pattern=9  source-literal=10)
+tier B matches: 181  (blank=2  expression=72  interpolation=24  local-dev=2  low-entropy=22  placeholder=39  regex-pattern=9  source-literal=11)
 unaccounted: 0
 env-example: blank-valued and complete
 
@@ -81,16 +81,16 @@ filter-repo`, which the audit-trail rule forbids. The gate is `unaccounted: 0`.
 
 ### Classification of every match
 
-All 130 Tier B matches fall into accounted categories:
+All 181 Tier B matches fall into accounted categories:
 
 | category | count | examples |
 |----------|-------|---------|
-| `expression` | 48 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py |
-| `placeholder` | 15 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL, `.../` path can't match Tier A) |
-| `low-entropy` | 27 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
-| `interpolation` | 17 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs; quoted-key JSON/YAML with interpolated values |
+| `expression` | 72 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py; `parsed.password or "cinema"` in dbt_assets.py; `token.label}` dict-literal closers now captured by TIER_B_RE suffix |
+| `placeholder` | 39 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL); `token_label = "prove-vde-43"` (suffix extension matches `token_label`; `vde-` is a placeholder keyword) |
+| `low-entropy` | 22 | short values, repeated-pattern values, or first tokens of multi-word code below 3.0 bits/char |
+| `interpolation` | 24 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs; quoted-key JSON/YAML with interpolated values |
 | `regex-pattern` | 9 | prove script grep patterns containing `.+` quantifiers — structurally impossible in any real credential |
-| `source-literal` | 10 | scanner reading its own historical source fixtures (Python string literals `"KEY=VALUE",  # comment`); first token has unbalanced closer — real credentials never end with an unmatched quote |
+| `source-literal` | 11 | scanner reading its own historical source fixtures (Python string literals `"KEY=VALUE",  # comment`); trailing structural punctuation stripped to reveal the unbalanced closer — real credentials never end with an unmatched quote |
 | `local-dev` | 2 | ADR-010 local-dev identities (`cinema`, `agent_reader`) in DSN values |
 | `blank` | 2 | `TMDB_API_KEY=` blank assignments in `.env.example` history |
 

@@ -64,8 +64,8 @@ TIER_A_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # ---------------------------------------------------------------------------
 
 TIER_B_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])[\"']?(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)\b[\"']?"
-    r"\s*[:=]\s*(?P<value>\S.*)$"
+    r"(?i)(?<![A-Za-z0-9])[\"']?(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)"
+    r"(?:[_\-][A-Za-z0-9]+)?[\"']?\s*[:=]\s*(?P<value>\S.*)$"
 )
 
 # Expression pattern — identifier, dotted identifier, no-arg call, or call with simple args.
@@ -221,18 +221,42 @@ def _classify_tier_b(raw_value: str) -> str | None:
     if re.match(r'^f["\'].*\{', v):
         return "interpolation"
 
+    # Fix A — strip trailing shell/config comment before classification.
+    # A comment cannot launder a real credential: TMDB_API_KEY=<hex> # TODO rotate → unaccounted.
+    # The interpolation check above already ran on the original first char; after comment
+    # removal we re-run it in case the comment was hiding a balanced-quoted interpolation
+    # (e.g. "${VAR}"  # note — balanced-quote unwrap reveals the $ after stripping).
+    if "#" in v:
+        v = v.split("#", 1)[0].rstrip()
+        if not v:
+            return "blank"
+        v = v.rstrip(",;")  # strip any punctuation that preceded the comment
+        if not v:
+            return "blank"
+        # If comment removal reveals a balanced-quoted string, unwrap it.
+        if len(v) >= 2 and v[0] in ('"', "'") and v[-1] == v[0]:
+            v = v[1:-1]
+            if not v:
+                return "low-entropy"
+        # Re-run interpolation check on the trimmed/unwrapped value.
+        if v[0] in ("$", "%", "{", "<", "«"):
+            return "interpolation"
+        if re.match(r'^f["\'].*\{', v):
+            return "interpolation"
+
     # Regex / shell expression — a real regex operator (.+, .*, .?, character class) is
     # structurally impossible in any real third-party credential.  Bare pipe alone is
     # insufficient: a credential could contain | without being a pattern.
     if re.search(r"\.\+|\.\*|\.\?|\[[^\]]+\]", v):
         return "regex-pattern"
 
-    # Expression and placeholder checks run on the FULL value first, before any whitespace
-    # handling.  This correctly classifies multi-word code values like
-    # `resolve_token(conn, bearer)` that would be misread if truncated to their first token.
+    # Expression and placeholder checks run on the (comment-stripped) value first, before
+    # any whitespace handling.  Fix C: never excuse a high-entropy value as an expression
+    # based solely on containing _.  Function calls (has `(`) and dotted paths (has `.`)
+    # remain expressions regardless of entropy — real credentials never contain either.
     if _EXPR_RE.match(v):
-        if len(v) >= 20 and "_" not in v and "." not in v and "(" not in v:
-            pass  # fall through — long separator-free value is more likely a credential
+        if len(v) >= 20 and _shannon(v) >= 3.0 and "." not in v and "(" not in v:
+            pass  # fall through — credential-shaped high-entropy token, not a code identifier
         else:
             return "expression"
 
@@ -288,7 +312,7 @@ def _classify_tier_b(raw_value: str) -> str | None:
                 return "low-entropy"
             if _EXPR_RE.match(head_core) and not (
                 len(head_core) >= 20
-                and "_" not in head_core
+                and _shannon(head_core) >= 3.0
                 and "." not in head_core
                 and "(" not in head_core
             ):
@@ -308,11 +332,36 @@ def _classify_tier_b(raw_value: str) -> str | None:
         # or "cinema"` fails EXPR_RE as a whole but the first token `parsed.password` is
         # a valid dotted attribute access).
         if _EXPR_RE.match(v) and not (
-            len(v) >= 20 and "_" not in v and "." not in v and "(" not in v
+            len(v) >= 20 and _shannon(v) >= 3.0 and "." not in v and "(" not in v
         ):
             return "expression"
         if _PLACEHOLDER_RE.search(v):
             return "placeholder"
+
+    # Trailing structural punctuation — a closing bracket or quote from an enclosing
+    # expression (dict literal, function call, Python source fixture) is never part of
+    # a real credential.  This catches two sources:
+    #   (a) Fix A: comment-stripped values like abcdef...hex" (historical source literals
+    #       where the Python string's closing " was part of the captured value).
+    #   (b) Fix B: values like token.label} captured because TIER_B_RE grabs \S.*$ past
+    #       a dict-literal closing brace.
+    # Mirrors the head_core logic in the whitespace branch above.
+    _v_core = v.rstrip("'\"``,;)]}")
+    if _v_core != v:
+        if not _v_core:
+            return "low-entropy"
+        if _EXPR_RE.match(_v_core) and not (
+            len(_v_core) >= 20
+            and _shannon(_v_core) >= 3.0
+            and "." not in _v_core
+            and "(" not in _v_core
+        ):
+            return "expression"
+        if _PLACEHOLDER_RE.search(_v_core):
+            return "placeholder"
+        if len(_v_core) < 12 or _shannon(_v_core) < 3.0:
+            return "low-entropy"
+        return "source-literal"
 
     # Low entropy: fewer than 12 chars, or Shannon entropy < 3.0 on a ≥12-char value
     if len(v) < 12:
@@ -522,6 +571,8 @@ _ACCOUNT_LINES: list[tuple[str, str]] = [
     ("TMDB_API_KEY=", "blank-or-no-match"),  # no value → no TIER_B_RE match; blank expected
     ("token: AgentToken,", "expression"),
     ('PGPASSWORD="${DBT_PASSWORD:-cinema}"', "any-accounted"),
+    # Fix C confirm: dotted function call must remain expression even though it is long
+    ("api_key=pipeline_config.resolve_tmdb_api_key()", "expression"),
 ]
 
 
@@ -535,8 +586,10 @@ def _run_self_check() -> None:
     _v_hex = "abcdef0123456789" * 2             # 32-char hex, entropy 4.0
     _v_alpha = "abcdefghijklmnopqrstuvwxyz" + "012345"  # 32 chars, entropy 5.0
     _v_mixed = "SuperSecretValue99!"             # mixed-charset, entropy 3.4
+    # Fix C: realistic prefixed token (tok_<hex>) — high-entropy, contains _ → must be unaccounted.
+    _v_tok = "tok" + "_" + "9f8e7d6c5b4a3f2e" + "1d0c9b8a7f6e5d4c"  # 36 chars, entropy ~4.1
     kill_lines: list[str] = [
-        # Trailing comment proves the prose fix: comment must NOT launder the credential.
+        # Existing kill tests (must remain unaccounted after all fixes).
         "TMDB_API" + "_KEY=" + _v_hex + "  # deploy key",
         "AGENT_TOOL" + "_TOKEN=" + _v_alpha,
         "api" + "_key=" + _v_hex,
@@ -547,6 +600,13 @@ def _run_self_check() -> None:
         # JSON/YAML quoted-key shape — TIER_B_RE must match; balanced inner value is real.
         # Shape: "api_key": "value",  # comment
         '"api' + '_key": "' + _v_hex + '",  # prod',
+        # Fix A: trailing TODO comment must NOT launder the credential as placeholder.
+        "TMDB_API" + "_KEY=" + _v_hex + "  # TODO rotate before launch",
+        # Fix B: SCREAMING_SNAKE suffixes on webhook and secret must match TIER_B_RE.
+        "SLACK_WEBHOOK" + "_URL=" + _v_hex,
+        "SECRET" + "_KEY=" + _v_hex,
+        # Fix C: high-entropy prefixed token (tok_<hex>) must not be excused as expression.
+        "AGENT_TOOL" + "_TOKEN=" + _v_tok,
     ]
 
     failures: list[str] = []
