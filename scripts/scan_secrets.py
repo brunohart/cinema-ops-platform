@@ -65,8 +65,12 @@ TIER_A_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 
 TIER_B_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9])[\"']?(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)"
-    r"(?:[_\-][A-Za-z0-9]+)?[\"']?\s*[:=]\s*(?P<value>\S.*)$"
+    r"(?P<keysuffix>(?:[_\-][A-Za-z0-9]+)?)[\"']?\s*[:=]\s*(?P<value>\S.*)$"
 )
+
+# Digest-suffix check: a SHA-256 (or other hash) of a token is deliberately not a secret.
+# Matches when the captured key name ends with a hash/digest segment.
+_DIGEST_KEY_RE = re.compile(r"(?i)(digest|hash|sha256|checksum|fingerprint)$")
 
 # Expression pattern — identifier, dotted identifier, no-arg call, or call with simple args.
 # Covers: api_key=api_key, token: AgentToken, resolve_tmdb_api_key(),
@@ -75,7 +79,7 @@ _EXPR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*(\([A-Za-z0-9_., ]*\))?$")
 
 # Placeholder keywords — case-insensitive substring check
 _PLACEHOLDER_RE = re.compile(
-    r"(?i)(test-|fixture-|dev-|example|change-me|changeme|dummy|placeholder|"
+    r"(?i)(test-|fixture-|dev-|demo|example|change-me|changeme|dummy|placeholder|"
     r"sample|redacted|your-|xxx|todo|\.\.\.|…|vde-|proof|<)"
 )
 
@@ -201,7 +205,7 @@ def _tier_a_hits(line: str) -> list[str]:
     return hits
 
 
-def _classify_tier_b(raw_value: str) -> str | None:
+def _classify_tier_b(raw_value: str, key_context: str = "") -> str | None:
     """Return the accounting reason for a Tier B match, or None if unaccounted."""
     v = _strip_value(raw_value)
 
@@ -210,6 +214,10 @@ def _classify_tier_b(raw_value: str) -> str | None:
 
     if v in _ADR010_USERS:
         return "local-dev"
+
+    # Digest/hash key: a SHA-256 or other hash of a token is not a secret itself.
+    if key_context and _DIGEST_KEY_RE.search(key_context):
+        return "digest"
 
     # Local URL with no credentials
     if re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?(/\S*)?$", v) and "@" not in v:
@@ -380,9 +388,14 @@ def _classify_tier_b(raw_value: str) -> str | None:
 def _scan_history(
     repo: Path,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Stream git log -p --all and return (tier_a_findings, tier_b_findings)."""
+    """Stream git log -p HEAD (HEAD ancestry only) and return (tier_a_findings, tier_b_findings).
+
+    Uses HEAD ancestry, not --all, so unrelated branches fetched from origin
+    (e.g. feature branches, demo branches) do not affect the verdict.  This
+    matches the issue command and what CI sees from a single-ref checkout.
+    """
     proc = subprocess.Popen(
-        ["git", "log", "-p", "--all", "--no-color", "--full-history"],
+        ["git", "log", "-p", "--no-color", "--full-history", "HEAD"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -416,7 +429,8 @@ def _scan_history(
         m = TIER_B_RE.search(content)
         if m:
             raw_val = m.group("value")
-            reason = _classify_tier_b(raw_val)
+            key_context = m.group(1) + (m.group("keysuffix") or "")
+            reason = _classify_tier_b(raw_val, key_context)
             tier_b.append(
                 {
                     "loc": loc,
@@ -481,7 +495,8 @@ def _scan_tree(repo: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
             m = TIER_B_RE.search(line)
             if m:
                 raw_val = m.group("value")
-                reason = _classify_tier_b(raw_val)
+                key_context = m.group(1) + (m.group("keysuffix") or "")
+                reason = _classify_tier_b(raw_val, key_context)
                 tier_b.append(
                     {
                         "loc": loc,
