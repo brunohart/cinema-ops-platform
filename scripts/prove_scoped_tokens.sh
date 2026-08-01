@@ -69,7 +69,7 @@ from agent.tokens import hash_token
 print(hash_token("""$TOKEN"""))
 PY
 )"
-STORED="$(psql "$DB" -Atc "select token_hash from meta.agent_tokens where label = 'proof-sites-1-3'")"
+STORED="$(psql "$DB" -Atc "select token_hash from meta.agent_tokens where token_hash = '$HASHED'")"
 if [[ "$STORED" != "$HASHED" ]]; then
   echo "expected stored hash $HASHED, got $STORED" >&2
   exit 1
