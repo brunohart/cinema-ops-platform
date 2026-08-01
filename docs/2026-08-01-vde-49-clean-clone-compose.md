@@ -14,11 +14,11 @@ A fresh `git clone` of this repository, followed by `cp .env.example .env` and
 
 - `db` service: healthy (Postgres 16-alpine, DDL applied at initdb)
 - `redpanda` service: healthy
-- `redpanda-init` service: exited 0 (topics created)
+- `redpanda-init` service: exited 0 (topics created) — **asserted by proof**
 - `seed` service: exited 0 — ran `dagster job execute -m orchestration.definitions -j cinema_ops_transform`
   (dbt silver + gold transforms over SQL-seeded bronze) — logged `RUN_SUCCESS` and `SEED OK (dagster path)`
-- `dagster` service: healthy (polled to healthy before PROOF OK)
-- `agent-tools` service: healthy (polled to healthy before PROOF OK)
+- `dagster` service: healthy (polled to healthy; **proof exits 1 on timeout**)
+- `agent-tools` service: healthy (polled to healthy; **proof exits 1 on timeout**)
 - `SELECT count(*) FROM gold.fct_booking` returns **2** (both exec and host psql agree)
 - Grain check passes: rows=2 grain_keys=2 (no duplicate booking_id)
 
@@ -33,15 +33,25 @@ that skips the INSERT when `booking_fee` column doesn't exist (VDE-49 step 10).
 ## Captured proof output
 
 ```
+==> ensure Docker bridge forwarding rules are in place
+==> clone HEAD to /tmp/strangertest-vde49-326935
+Cloning into '/tmp/strangertest-vde49-326935'...
+==> cp .env.example .env
+==> docker compose -p vde49clean up -d --build
+[build output — seed image layers rebuilt; dagster/agent-tools cached ...]
+
 ==> poll for db healthy + seed exited 0 (max 600s)
-  05:07:19 db=healthy seed=exited(exit=0)
+  05:15:58 db=healthy seed=exited(exit=0)
 
 ==> compose ps
-NAME                       IMAGE                   SERVICE       STATUS
-vde49clean-agent-tools-1   vde49clean-agent-tools  agent-tools   Up (health: starting)  0.0.0.0:18787->8787/tcp
-vde49clean-dagster-1       vde49clean-dagster      dagster       Up (health: starting)  0.0.0.0:13000->3000/tcp
-vde49clean-db-1            postgres:16-alpine      db            Up (healthy)           0.0.0.0:15432->5432/tcp
-vde49clean-redpanda-1      redpanda:v24.2.4        redpanda      Up (healthy)           0.0.0.0:29092->29092/tcp
+NAME                       IMAGE                                               COMMAND                  SERVICE       CREATED          STATUS                                     PORTS
+vde49clean-agent-tools-1   vde49clean-agent-tools                              "python -m agent.ser…"   agent-tools   30 seconds ago   Up Less than a second (health: starting)   0.0.0.0:18787->8787/tcp, [::]:18787->8787/tcp
+vde49clean-dagster-1       vde49clean-dagster                                  "dagster dev -w work…"   dagster       30 seconds ago   Up Less than a second (health: starting)   0.0.0.0:13000->3000/tcp, [::]:13000->3000/tcp
+vde49clean-db-1            postgres:16-alpine                                  "docker-entrypoint.s…"   db            33 seconds ago   Up 24 seconds (healthy)                    0.0.0.0:15432->5432/tcp, [::]:15432->5432/tcp
+vde49clean-redpanda-1      docker.redpanda.com/redpandadata/redpanda:v24.2.4   "/entrypoint.sh redp…"   redpanda      33 seconds ago   Up 24 seconds (healthy)                    8081-8082/tcp, 0.0.0.0:28081-28082->28081-28082/tcp, [::]:28081-28082->28081-28082/tcp, 9092/tcp, 0.0.0.0:29092->29092/tcp, [::]:29092->29092/tcp, 0.0.0.0:29644->9644/tcp, [::]:29644->9644/tcp
+
+==> assert redpanda-init exited 0
+  redpanda-init: state=exited exit=0
 
 ==> count via docker exec (inside db container)
   fct_booking rows (exec): 2
@@ -53,15 +63,15 @@ vde49clean-redpanda-1      redpanda:v24.2.4        redpanda      Up (healthy)   
   fct_booking grain: rows=2 grain_keys=2
 
 ==> poll dagster and agent-tools to healthy (max 120s)
-  05:07:19 dagster=starting agent-tools=starting
-  05:07:24 dagster=starting agent-tools=healthy
-  05:07:30 dagster=starting agent-tools=healthy
-  05:07:35 dagster=healthy agent-tools=healthy
+  05:15:58 dagster=starting agent-tools=starting
+  05:16:03 dagster=starting agent-tools=healthy
+  05:16:08 dagster=starting agent-tools=healthy
+  05:16:13 dagster=healthy agent-tools=healthy
 
 ==> seed log — assert dagster path
 seed-1  | ==> fix agent_reader password
 seed-1  | ==> dagster job execute cinema_ops_transform (dbt silver + gold)
-seed-1  | 2026-08-01 05:07:18 +0000 - dagster - DEBUG - cinema_ops_transform - 0e03d974-d461-43df-8770-b79475654ccf - 8 - RUN_SUCCESS - Finished execution of run for "cinema_ops_transform".
+seed-1  | 2026-08-01 05:15:57 +0000 - dagster - DEBUG - cinema_ops_transform - 73e2a28e-da77-4b42-9325-a77ab4e86ae2 - 8 - RUN_SUCCESS - Finished execution of run for "cinema_ops_transform".
 seed-1  | SEED OK (dagster path)
 seed-1  | ==> re-apply agent role grants (covers dbt-created tables)
 seed-1  | ==> verify agent_reader kill-test
@@ -73,7 +83,8 @@ seed-1  | fct_booking_rows=2
 
 PROOF OK
   fct_booking_rows=2
-  db: healthy  seed: exited 0  grain: rows=2 grain_keys=2  dagster: healthy  agent-tools: healthy
+  db: healthy  redpanda-init: exited 0  seed: exited 0  grain: rows=2 grain_keys=2  dagster: healthy  agent-tools: healthy
+==> cleanup: compose down -v
 ```
 
 ---
