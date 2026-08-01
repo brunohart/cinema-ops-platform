@@ -168,7 +168,8 @@ done
 echo ""
 echo "==> seed log — assert dagster path"
 SEED_LOG=$(docker compose -p "${PROJECT}" logs seed 2>&1)
-echo "${SEED_LOG}" | tail -20
+# Show the decisive lines (dagster run status, SEED OK marker, fct_booking count)
+echo "${SEED_LOG}" | grep -E "RUN_SUCCESS|RUN_FAILURE|SEED OK|fct_booking_rows|==>" || true
 if ! echo "${SEED_LOG}" | grep -q 'SEED OK (dagster path)'; then
   echo "FAIL: seed log does not contain 'SEED OK (dagster path)' — dagster did not run" >&2
   exit 1
