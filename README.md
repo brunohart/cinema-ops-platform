@@ -344,6 +344,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
+| public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 13/13 sections pass |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -419,6 +420,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
+| — | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
 
 That last row is the only one with no issue id, and it stays visibly empty rather than being filled
 in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
@@ -500,10 +502,44 @@ dbt/
 
 mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
 evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
+Dockerfile                 stdlib-only demo image; no pip install; USER 10001
+fly.toml                   Fly.io app config for cinema-ops-platform-demo
+src/agent/demo_server.py   public demo server (VDE-54); reuses real policy layer
+src/agent/demo_data.py     fixture rows + demo token table (sha256-keyed)
+src/agent/catalog.py       tool names, descriptions, columns, PII-absent list (stdlib)
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
 ```
+
+---
+
+## Poke it from your phone
+
+The bearer-scoped tool surface is deployed as a read-only fixture demo on Fly.io.
+Token `cinema-ops-demo-2026-08-01` is scoped to two sites (1 and 2), three tools, and expires 2026-08-31.
+
+```bash
+# List sessions — scoped bearer returns rows, dataset=fixture
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  https://cinema-ops-platform-demo.fly.dev/tools/list_sessions | python3 -m json.tool
+
+# No bearer → 401 missing_bearer_token
+curl -s https://cinema-ops-platform-demo.fly.dev/tools/list_sessions | python3 -m json.tool
+
+# Out-of-scope site 3 → 403 site_scope (token is scoped to sites 1–2)
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  "https://cinema-ops-platform-demo.fly.dev/tools/list_sessions?siteIds=3" | python3 -m json.tool
+
+# Tool manifest — no bearer needed for schema
+curl -s https://cinema-ops-platform-demo.fly.dev/tools | python3 -m json.tool
+```
+
+Every response carries `X-Cinema-Ops-Dataset: fixture` and `"dataset":"fixture"` — the demo cannot
+be mistaken for live data. No Postgres, no secrets on the Fly app. The same policy layer
+(`agent.refuse`) enforces the scoping rules as the local docker-compose environment
+([ADR-014](DECISIONS.md#adr-014--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+supplements [ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)).
 
 ---
 
@@ -519,6 +555,8 @@ An artefact built to be operated and defended completely, not a demonstration of
   model ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)). At genuine scale this choice does not
   hold, and the honest answer is a columnar engine — which the medallion layering ports to largely
   intact.
+- The public Fly demo illustrates the policy in the browser; [ADR-014](DECISIONS.md#adr-014--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+  records why this does not contradict ADR-010 — the demo is a fixture illustration, not the managed-cloud primary runtime ADR-010 ruled out.
 
 ## What this does not claim
 

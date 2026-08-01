@@ -83,6 +83,7 @@ Failure modes I can name, have decided not to handle in this build, and can defe
 | `cinema_ops` | hard deletes — a row vanishes with nothing to detect it by | source system is append-mostly for the tables in scope | periodic full reconciliation, or CDC instead of watermark reads |
 | ticketing events | out-of-order arrival across partitions | event ordering is not load-bearing for the facts modelled here | event-time windowing with a lateness allowance |
 | landing files | partial file read — file consumed while still being written | _(unfilled — see section 8)_ | atomic rename / marker file convention with the producer |
+| public demo (Fly.io) | fixture data diverges from production schema | the demo is illustrative only; it carries `"dataset":"fixture"` on every response and `X-Cinema-Ops-Dataset: fixture` header | retire the demo or wire it to a read replica once production schema is stable |
 
 ### 2c. The three clocks — why `cinema_ops` re-reads five minutes
 
@@ -566,3 +567,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-07-30 | `booking_id` on the ticket fact as a degenerate dimension; `booking_total` derived | store the booking total on each ticket row | an identifier isn't summed so it can't fan out; a derived number cannot drift from the rows it sums |
 | 2026-07-31 | quarantine bad rows into `bronze.quarantine` with `raw_payload`; batch continues | drop bad rows, or fail the whole batch | drop destroys evidence; fail-batch lets one bad row block a thousand good ones; quarantine is the only option that survives review (ADR-011 / VDE-14) |
 | 2026-07-31 | issues run plan (Opus) → implement (Sonnet) → verify (Opus), each phase recorded in an append-only ledger | one agent with a longer prompt | an agent that plans and builds in one breath never treats the design as a separable artefact, and one that checks its own work reads what it meant; the ledger is the only thing that carries between runs (ADR-013) |
+| 2026-08-01 | stdlib-only public demo on Fly.io with fixture data; real policy layer reused; no DB in image | extend the local docker-compose surface to the internet | ADR-014: the demo illustrates the policy without exposing the warehouse; ADR-010's "locally operable" rule applies to the primary runtime, not a read-only illustration |
