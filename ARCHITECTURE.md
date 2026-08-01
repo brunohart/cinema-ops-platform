@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-07-31
-**Revision count:** 6
+**Last revised:** 2026-08-01
+**Revision count:** 7
 
 ---
 
@@ -566,3 +566,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-07-30 | `booking_id` on the ticket fact as a degenerate dimension; `booking_total` derived | store the booking total on each ticket row | an identifier isn't summed so it can't fan out; a derived number cannot drift from the rows it sums |
 | 2026-07-31 | quarantine bad rows into `bronze.quarantine` with `raw_payload`; batch continues | drop bad rows, or fail the whole batch | drop destroys evidence; fail-batch lets one bad row block a thousand good ones; quarantine is the only option that survives review (ADR-011 / VDE-14) |
 | 2026-07-31 | issues run plan (Opus) → implement (Sonnet) → verify (Opus), each phase recorded in an append-only ledger | one agent with a longer prompt | an agent that plans and builds in one breath never treats the design as a separable artefact, and one that checks its own work reads what it meant; the ledger is the only thing that carries between runs (ADR-013) |
+| 2026-08-01 | CI on GitHub Actions — ruff, mypy, unit, then integration + dbt build on an ephemeral Postgres service | no CI, or proofs run only locally | the proof scripts already existed; what was missing was a machine that runs them where nobody can quietly not run them. Does not reverse ADR-010 — docker-compose stays the reference environment; the runner executes the same proofs |
