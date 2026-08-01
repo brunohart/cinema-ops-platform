@@ -2,14 +2,20 @@
   "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Bounded, allowlisted query surface for the agent read path (VDE-39 / ADR-009)",
+  "description": "Bounded, allowlisted agent read path — PII absent from every output shape (VDE-39 / VDE-42 / ADR-009)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./queries": "./dist/queries.js",
+    "./schemas": "./src/schemas.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "prove": "bash ../scripts/prove_allowlisted_queries.sh"
+    "prove": "bash ../scripts/prove_allowlisted_queries.sh",
+    "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh"
   },
   "engines": {
     "node": ">=20"
