@@ -30,7 +30,7 @@ lesson to a ledger the next run reads before it plans.
 | `docs/agent-ledger/ledger.jsonl` | the record itself — append-only, hash-chained per session, `merge=union` |
 | `docs/agent-ledger/README.md` | what the file is, what it guarantees, and what it does not |
 | `.cursor/hooks.json`, `.cursor/hooks/pipeline_hook.py` | five events that make the protocol structural |
-| `scripts/prove_agent_pipeline.sh`, `tests/agents/test_agent_ledger.py` | the proof and the 42 tests behind it |
+| `scripts/prove_agent_pipeline.sh`, `tests/agents/test_agent_ledger.py` | the proof and the 49 tests behind it |
 | `.cursor/commands/pipeline.md` | `/pipeline` — start the three phases by hand |
 
 ## Proof
@@ -66,15 +66,16 @@ clean clone. Observed, verbatim:
   ok   — a phase that ran on the wrong model is reported and recorded as a note
   ok   — the stop hook hands back a run that changed the repository with no phase entries
   ok   — committing the work does not escape it — HEAD is compared against the run's own baseline
+  ok   — the baseline is a real commit id, so the checks above are not comparing HEAD with itself
   ok   — an exempt entry does not close a run that changed the repository
   ok   — a phase recorded with no subagent behind it is challenged as a claim
   ok   — the same run finishes cleanly once the phases are recorded and the deviation is noted
   ok   — a multi-line lesson is flattened to one line before it can forge prompt structure
 == 7. the committed ledger validates ==
-ledger ok: 6 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
+ledger ok: 10 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
 == 8. the test suite ==
-..........................................                               [100%]
-42 passed in 1.71s
+.................................................                        [100%]
+49 passed in 60.51s (0:01:00)
 
 agent pipeline ok: models pinned, hooks registered and enforcing, ledger append-only
 $ echo $?
@@ -106,6 +107,32 @@ Findings 3 and 4 are the ones worth keeping: both were ways for a run to finish 
 it did not do, in a mechanism whose entire purpose is to make that impossible. An enforcement gate is
 worth exactly as much as the attempt to get past it.
 
+### Pass two, on the fixes — also fail
+
+The protocol says a `fail` verdict goes back to the implementer and is verified again, so it was. The
+second Opus pass was asked to attack the fixes rather than re-audit the feature, and found a better
+bug than anything in the first list:
+
+| # | finding | fix |
+|---|---|---|
+| 1 | **the exemption was unreachable.** A run that changed nothing, then wrote the `exempt` entry the protocol demands, had dirtied a tracked file — and was then refused the exemption it had just written. Committing did not help: the commit moved HEAD. The only way to close an exempt run was to disobey the rule offering the exemption | the ledger is excluded from the authorship signal, by git pathspec rather than by parsing porcelain — the first version of that parse sliced a character off the path |
+| 2 | `commit --amend`, `reset --hard` and `rebase` all finished silently: "did HEAD move forward" is not "did this run author anything" | on the branch the run started on, any movement of the tip is authorship; ancestry is only asked across a branch change |
+| 3 | `git()` returned stdout regardless of exit code, and `git rev-parse HEAD` prints the literal string `HEAD` and exits 128 in a repo with no commits — so a stored baseline of `"HEAD"` re-resolved to the current commit and the ancestry check compared HEAD with itself. **Two tests and one proof check were passing while testing nothing** | exit codes honoured; both fixtures given history; the proof asserts the baseline is 40 hex characters before trusting anything downstream |
+| 4 | the unattested-phase excuse was a substring test, so "refactored the implementation" and "verifying by hand" excused both phases | the excuse is a field: `note --about <phase>` |
+| 5 | `validate_entries` interpolated the session id unescaped while every neighbouring field used `!r`, and the stop hook puts those strings in front of an agent — the tamper alarm was itself an injection vector, firing exactly when the file had been tampered with | `{session!r}` |
+| 6 | `subagentStop` accepted an `exempt` entry as a stand-in for a phase, contradicting the stop hook two functions away | dropped |
+| 7 | an unrecognised subagent name silently disabled phase detection | recorded, and reported in the stop message where it matters — this run hit that case itself |
+
+Finding 3 is the one to remember. Three checks written specifically to close a hole were green because
+a git helper returned plausible rubbish, and green tests are the thing you stop questioning. The
+lesson is in the ledger: a git helper that ignores exit codes hands you an answer, not an error.
+
+One more, found by neither pass: an exported `CURSOR_PROJECT_DIR` left over from debugging sent three
+ledger entries to a scratch repository, and the success line looked identical to a real one. `append`
+now prints the absolute path it wrote to, and an autouse fixture makes the same mistake structurally
+impossible in the test suite — which had already made it once, appending two test entries to this
+ledger before they were reverted.
+
 ## The deviation, on the record
 
 The implement phase ran on **Opus, not Sonnet**. This environment's delegation tool exposed no
@@ -127,21 +154,21 @@ python3 scripts/agent_ledger.py digest
 ```
 
 ```
-LEDGER — 1 run(s), 6 entries, 6 lesson(s) in docs/agent-ledger/ledger.jsonl
+LEDGER — 1 run(s), 10 entries, 10 lesson(s) in docs/agent-ledger/ledger.jsonl
 
-Most recent lessons (newest first, 6 of 6):
+Most recent lessons (newest first, 6 of 10):
+  2026-08-01 note [pipeline, tooling]: Check where the ledger CLI is writing before trusting that it wrote: an exported CURSOR_PROJECT_DIR redirects it, and the success line looked identical — which is why append now prints the absolute path
+      evidence: scripts/agent_ledger.py cmd_append prints the resolved ledger path
+  2026-08-01 note [pipeline, process]: A read-only checker cannot pin a verdict to a moving tree: tell it the commit you want reviewed, and if you fix something while it works, name the new HEAD when you ask for its report
+      evidence: verify pass 2 process note: HEAD moved three times during the review
+  2026-08-01 implement [git, tests]: A git helper that returns stdout without checking the exit code hands you plausible rubbish: rev-parse HEAD prints "HEAD" and exits 128 in a repo with no commits, which made an ancestry check compare a commit with itself and pass
+      evidence: tests/agents/test_agent_ledger.py::test_a_baseline_is_never_the_string_head
+  2026-08-01 verify [hooks, pipeline]: When you close a hole by making a rule stricter, run the honest path that rule protects all the way to the end — writing the ledger entry the protocol demands is itself a change to the repository, and a gate that punishes the compliant run is a worse bug than the one you closed
+      evidence: verify pass 2, must-fix 1; .cursor/hooks/pipeline_hook.py _work_outside_the_ledger
   2026-08-01 note [models, pipeline]: This environment's Task tool exposed no Sonnet 5 model slug, so the implement phase ran on Opus — check the available slugs before claiming a phase ran on its pinned model, and let the hook record the disagreement rather than writing the model you intended
       evidence: docs/agent-ledger/ledger.jsonl: implement entries carry model=claude-opus-5
   2026-08-01 implement [pipeline, hooks]: An enforcement rule a single ledger entry can satisfy is a suggestion: before trusting a gate, reach the state it exists to catch and try to close the run from there — exempt closed a run that had changed the repo, and three unattested phase entries closed one that never delegated anything
       evidence: scripts/prove_agent_pipeline.sh section 6; tests/agents/test_agent_ledger.py
-  2026-08-01 verify [hooks, git]: When a hook decides whether a run changed the repository, compare against a baseline the run recorded at its own first hook — never against upstream or origin/main, which describe what earlier runs left on the branch, so they let a run that commits and pushes escape while nagging a run that touched…
-      evidence: verify pass 1, finding c2; .cursor/hooks/pipeline_hook.py run_changed_the_repo
-  2026-08-01 implement [tests, proof]: pytest cannot collect anything in this repository without psycopg, because tests/conftest.py imports it at module scope — a proof script that must work on a clean clone runs pytest with --noconftest, or skips it out loud
-      evidence: python3 -m pytest tests/agents -q --noconftest
-  2026-08-01 implement [hooks, pipeline]: A hook that imports a module from scripts/ must set sys.dont_write_bytecode before the import: a stray scripts/__pycache__ makes every 'did this run change the repository' check answer yes, forever
-      evidence: scripts/prove_agent_pipeline.sh section 6; .cursor/hooks/pipeline_hook.py
-  2026-08-01 plan [pipeline, cursor]: Cursor documents AGENTS.md and .cursor/rules/*.mdc as read by cloud agents from every entry point, but documents CLAUDE.md only for the CLI — anything that must fire unattended belongs in an alwaysApply rule and a short AGENTS.md summary, not in CLAUDE.md alone
-      evidence: cursor.com/docs/cloud-agent/best-practices vs cursor.com/docs/cli/using#rules
 ```
 
 ## Known limits
@@ -152,7 +179,8 @@ Most recent lessons (newest first, 6 of 6):
   turns are unhooked, which is why the protocol is written in the always-applied rule and in
   `AGENTS.md` as well as enforced — three statements of the same thing, deliberately.
 - **`subagent_type` is assumed to equal the subagent file's `name`.** If Cursor reports something
-  else, phase detection and the model note go quiet while the `stop` hook still enforces: the failure
-  direction is more nagging, not less enforcement.
+  else, phase detection and the model note go quiet while the `stop` hook still enforces — and the
+  unrecognised name is recorded and read back in the stop message, so the disagreement is named
+  rather than silent. The failure direction is a louder question, not a quieter gate.
 - **A single-line lesson can still be persuasive.** Flattening removes forged structure, not rhetoric.
   The control is review: ledger entries arrive in pull requests like code.

@@ -492,7 +492,12 @@ def cmd_append(args: argparse.Namespace) -> int:
         source=args.source,
         root=root,
     )
-    print(f"ledger: appended {entry['phase']} entry {entry['id']} for session {entry['session']}")
+    # The path, not just the phase: CURSOR_PROJECT_DIR redirects the ledger, and an entry written to
+    # the wrong repository looks exactly like a successful one until someone reads the file.
+    print(
+        f"ledger: appended {entry['phase']} entry {entry['id']} for session {entry['session']} "
+        f"→ {ledger_path(root)}"
+    )
     missing = check_session(load_entries(ledger_path(root))[0], args.session)
     if missing:
         print(f"ledger: session still owes {', '.join(missing)}")
