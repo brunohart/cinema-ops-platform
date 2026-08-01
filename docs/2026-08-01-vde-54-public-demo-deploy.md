@@ -22,9 +22,9 @@
 | `fly.toml` | app=cinema-ops-platform-demo, region=syd, concurrency soft=20 hard=40 |
 | `scripts/deploy_fly.sh` | Exit 2 if no flyctl/FLY_API_TOKEN; else deploy + prove curls |
 | `scripts/prove_public_demo.sh` | 14-section proof: import graph, sha256, fly config, live curls; all sections assert HTTP status codes |
-| `DECISIONS.md` | ADR-014 appended after ADR-013 |
+| `DECISIONS.md` | ADR-015 appended (ADR-014 was already taken on main by VDE-51) |
 | `ARCHITECTURE.md` | §2b flood row + §10 decision log row |
-| `README.md` | "Poke it from your phone" section (not-yet-live tense, local curls, Fly URL labelled post-deploy), Prove it row, build log row, repo map lines, ADR-014 scope sentence |
+| `README.md` | "Poke it from your phone" section (not-yet-live tense, local curls, Fly URL labelled post-deploy), Prove it row, build log row, repo map lines, ADR-015 scope sentence |
 
 ---
 

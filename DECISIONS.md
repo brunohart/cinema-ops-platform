@@ -448,7 +448,49 @@ promote aggressively into `CLAUDE.md` and truncate, not to keep injecting more.
 
 ---
 
-## ADR-014 — Public demo surface supplements, not replaces, the local tool interface
+## ADR-014 — Prove secrets absent by classification, not by rewriting history
+
+**Status** Accepted · 2026-08-01
+
+**Context** The repository is public. The history contained commented-out credential-shaped lines
+in `.env.example` and ADR-010 local-dev identities (`cinema:cinema`, `agent_reader:agent_reader`)
+embedded in compose files, dbt profiles, and prove scripts. Running the issue's grep over full
+history returns a non-zero count for structural reasons — not because real secrets were ever
+committed — and that count can only grow as more code is added. The naive response is to chase
+zero by rewriting history, but CLAUDE.md rule one is that the audit trail starts at commit one and
+is never rewritten. The other naive response is to trust a hosted scanning service, but that scanner
+is invisible on a clean clone and does not satisfy "done is a green exit code on a clean clone."
+
+**Decision** An in-repo stdlib-only classifier (`scripts/scan_secrets.py`) runs over full git history
+and the working tree, classifying every credential-shaped match by **value shape only** — never by
+file path, because a path exclusion is how a real secret hides in an allowlisted file. Exit code 0
+means Tier A (provider-shaped credentials) hits zero and Tier B (secret-named assignments) unaccounted
+hits zero. The gate is therefore `unaccounted: 0`, not `count: 0`. A blank-valued `.env.example`
+documents every key the code reads; `secret-scan.yml` runs the proof on every push and pull request
+with `fetch-depth: 0` (a shallow clone would turn the history scan into a false green).
+
+**Alternatives rejected** History rewrite with `git filter-repo` or BFG — destroys an audit trail
+that starts at commit one for credentials that were never leaked. A managed scanning service
+(GitHub Secret Scanning, truffleHog, Gitleaks) — invisible on a clean clone, so it cannot satisfy
+the "green exit code on a clean clone" proof requirement, and adds an external dependency to a
+repository whose instinct is ADR-010: operate locally, verify locally.
+
+**Consequences** The accounting rules in `scan_secrets.py` require maintenance: a novel provider
+credential shape is a false negative until its Tier A pattern is added. Likewise, a new structural
+pattern in the codebase may land in Tier B unaccounted until a value-shape reason is added. The
+file is committed and diffed like code, so additions are reviewable. If the accounting list grows
+past roughly a dozen entries the codebase, not the scanner, is the problem — that would be the
+signal to audit what the code is doing with credential-shaped names.
+
+**What would change my mind** A genuinely leaked third-party credential anywhere in history — at
+that point rotation (at the provider first) then `git filter-repo` then a §7 field correction is
+the right path, and this ADR would record the reversal. Or the accounting table growing past
+roughly a dozen entries with no corresponding code cleanup — that would mean the classification
+approach has become taxonomy rather than proof.
+
+---
+
+## ADR-015 — Public demo surface supplements, not replaces, the local tool interface
 
 **Status** Accepted · 2026-08-01 · supplements ADR-010
 
@@ -456,7 +498,8 @@ promote aggressively into `CLAUDE.md` and truncate, not to keep injecting more.
 demonstrated without a local Postgres or Docker install. ADR-010 ruled out managed cloud for the
 _primary_ runtime on the grounds that a reviewer must be able to run the whole thing; that reasoning
 applies to the operational warehouse, not to a read-only fixture demo that exists precisely so a
-reviewer does not need anything installed.
+reviewer does not need anything installed. (Numbered ADR-015 because ADR-014 was already taken on
+`main` by VDE-51's secrets classifier before this branch merged.)
 
 **Decision** A separate, stdlib-only demo server (`src/agent/demo_server.py`) runs over fixture data
 (`src/agent/demo_data.py`) and can be deployed to Fly.io as a thin public surface once

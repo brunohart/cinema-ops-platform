@@ -12,7 +12,7 @@ GET_SITE_PERFORMANCE = "get_site_performance"
 GET_FILM_ATTENDANCE = "get_film_attendance"
 LIST_SESSIONS = "list_sessions"
 
-# Fixed, ordered. The demo surface exposes exactly these three (ADR-014).
+# Fixed, ordered. The demo surface exposes exactly these three (ADR-015).
 IMPLEMENTED_TOOLS: tuple[str, ...] = (
     GET_SITE_PERFORMANCE,
     GET_FILM_ATTENDANCE,
