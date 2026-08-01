@@ -1,0 +1,46 @@
+# VDE-47 — eval suite over the MCP server, running in CI.
+# Subject: access behaviour at the boundary (contract, scope refusal, PII absence).
+name: mcp-eval
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mcp/**"
+      - "evals/**"
+      - "scripts/prove_mcp_eval.sh"
+      - "dist/**"
+      - ".github/workflows/mcp-eval.yml"
+  pull_request:
+    paths:
+      - "mcp/**"
+      - "evals/**"
+      - "scripts/prove_mcp_eval.sh"
+      - "dist/**"
+      - ".github/workflows/mcp-eval.yml"
+  workflow_dispatch:
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # promptfoo@latest requires ^20.20.0 || >=22.22.0
+          node-version: "22.22"
+          cache: npm
+          cache-dependency-path: mcp/package-lock.json
+
+      - name: Prove MCP eval suite
+        run: ./scripts/prove_mcp_eval.sh --output evals/results.json
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-eval-results
+          path: evals/results.json
+          if-no-files-found: ignore
