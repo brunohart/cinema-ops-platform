@@ -14,6 +14,9 @@ BEGIN
 END
 $$;
 
+-- VDE-44 — hard query budget; also SET on connect in the tools server.
+ALTER ROLE agent_reader SET statement_timeout = '5s';
+
 -- Connect privilege (compose / local prove set the password at provision time).
 GRANT CONNECT ON DATABASE cinema_ops TO agent_reader;
 
@@ -58,6 +61,12 @@ BEGIN
       WHERE table_schema = 'gold' AND table_name = 'fct_booking'
   ) THEN
     GRANT SELECT ON gold.fct_booking TO agent_reader;
+  END IF;
+  IF EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'gold' AND table_name = 'fct_showtime_performance'
+  ) THEN
+    GRANT SELECT ON gold.fct_showtime_performance TO agent_reader;
   END IF;
 END
 $$;
