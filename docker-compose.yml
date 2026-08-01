@@ -16,17 +16,18 @@ services:
       - ./sql/meta/001_watermarks.sql:/docker-entrypoint-initdb.d/030_meta_watermarks.sql:ro
       - ./sql/meta/002_pipeline_runs.sql:/docker-entrypoint-initdb.d/030_meta_pipeline_runs.sql:ro
       - ./sql/meta/003_agent_access_log.sql:/docker-entrypoint-initdb.d/030_meta_agent_access_log.sql:ro
-      - ./sql/cinema_ops/001_bookings.sql:/docker-entrypoint-initdb.d/031_cinema_ops.sql:ro
-      - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/032_raw_cinema_ops.sql:ro
-      - ./sql/bronze/003_events_raw.sql:/docker-entrypoint-initdb.d/033_events_raw.sql:ro
-      - ./sql/bronze/004_events_raw_grants.sql:/docker-entrypoint-initdb.d/034_events_raw_grants.sql:ro
+      - ./sql/meta/003_agent_tokens.sql:/docker-entrypoint-initdb.d/031_agent_tokens.sql:ro
+      - ./sql/cinema_ops/001_bookings.sql:/docker-entrypoint-initdb.d/032_cinema_ops.sql:ro
+      - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/033_raw_cinema_ops.sql:ro
+      - ./sql/bronze/003_events_raw.sql:/docker-entrypoint-initdb.d/034_events_raw.sql:ro
+      - ./sql/bronze/004_events_raw_grants.sql:/docker-entrypoint-initdb.d/035_events_raw_grants.sql:ro
+      - ./sql/bronze/005_raw_tmdb.sql:/docker-entrypoint-initdb.d/036_raw_tmdb.sql:ro
+      - ./sql/bronze/005_film_raw.sql:/docker-entrypoint-initdb.d/037_film_raw.sql:ro
       - ./sql/gold/001_fact_grains.sql:/docker-entrypoint-initdb.d/040_fact_grains.sql:ro
+      - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
       - ./sql/gold/002_sla_check_columns.sql:/docker-entrypoint-initdb.d/041_sla_check_columns.sql:ro
       - ./sql/gold/003_dim_customer.sql:/docker-entrypoint-initdb.d/042_dim_customer.sql:ro
       - ./sql/init/005_agent_role.sql:/docker-entrypoint-initdb.d/043_agent_role.sql:ro
-      - ./sql/bronze/005_raw_tmdb.sql:/docker-entrypoint-initdb.d/035_raw_tmdb.sql:ro
-      - ./sql/bronze/005_film_raw.sql:/docker-entrypoint-initdb.d/035_film_raw.sql:ro
-      - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
       - ./sql/meta/002_agent_access_log.sql:/docker-entrypoint-initdb.d/050_agent_access_log.sql:ro
       - ./sql/gold/002_dim_customer.sql:/docker-entrypoint-initdb.d/051_dim_customer.sql:ro
       - ./sql/gold/003_agent_redteam_fixture.sql:/docker-entrypoint-initdb.d/052_agent_redteam_fixture.sql:ro

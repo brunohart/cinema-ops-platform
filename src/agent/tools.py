@@ -1,21 +1,98 @@
-"""Three read-only gold tools — the only surface an agent can reach.
+"""Read-only gold tools — the only surface an agent can reach.
 
 ADR-009: a fixed parameterised tool set, not a SQL endpoint. ARCHITECTURE §6c:
 PII fields are not in any response shape. The query never selects them; the
 dict returned has no key for them; agent_reader holds no grant on them.
 
-Every invocation is written to meta.agent_access_log before the caller sees
-the result — including refusals — so a red-team run leaves a trail.
+Two complementary entry points:
+
+- ``invoke_tool`` — VDE-48 red-team surface (get_film / occupancy / revenue);
+  every invocation is written to meta.agent_access_log, including refusals.
+- ``get_site_performance`` — VDE-41/45 token-scoped HTTP tool; site scope is
+  enforced by ``agent.refuse.authorize`` before this runs.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from typing import Any
+from datetime import date
+from typing import Any, Sequence
 
 import psycopg
 from psycopg.rows import dict_row
+
+
+# Token-scoped HTTP tool (VDE-41 / VDE-45). Kept alongside the VDE-48 red-team
+# surface; the Bearer tools server binds site scope before calling this.
+GET_SITE_PERFORMANCE = "get_site_performance"
+
+_SITE_PERFORMANCE_COLUMNS = (
+    "site_id",
+    "show_date",
+    "seats_sold",
+    "seats_capacity",
+    "gross_revenue",
+)
+
+
+def _jsonable(value: Any) -> Any:
+    from decimal import Decimal
+
+    if isinstance(value, Decimal):
+        return float(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return value
+
+
+def get_site_performance(
+    conn: psycopg.Connection,
+    site_ids: Sequence[int],
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict[str, Any]:
+    """Site daily performance for the *bound* site_ids only.
+
+    ``site_ids`` must already have passed the VDE-45 refusal gate — this
+    function does not re-check authorisation; it binds what it is given.
+    """
+    bound = [int(s) for s in site_ids]
+    if not bound:
+        # Should be unreachable after the refusal gate (empty bind is refused
+        # when the caller named sites). Kept as a belt for direct callers.
+        return {"tool": GET_SITE_PERFORMANCE, "site_ids": [], "rows": []}
+
+    cols = ", ".join(_SITE_PERFORMANCE_COLUMNS)
+    clauses = ["site_id = ANY(%s)"]
+    args: list[Any] = [bound]
+    if date_from is not None:
+        clauses.append("show_date >= %s")
+        args.append(date_from)
+    if date_to is not None:
+        clauses.append("show_date <= %s")
+        args.append(date_to)
+
+    where = " AND ".join(clauses)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
+            SELECT {cols}
+              FROM gold.site_performance
+             WHERE {where}
+             ORDER BY site_id, show_date
+            """,
+            args,
+        )
+        rows = cur.fetchall()
+
+    return {
+        "tool": GET_SITE_PERFORMANCE,
+        "site_ids": bound,
+        "rows": [{k: _jsonable(r[k]) for k in _SITE_PERFORMANCE_COLUMNS} for r in rows],
+    }
+
 
 # The bounded surface. A request for anything else is refused and logged.
 TOOL_NAMES = frozenset(
