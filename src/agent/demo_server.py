@@ -7,8 +7,9 @@ Run:
     PYTHONPATH=src python3 -m agent.demo_server [--host 0.0.0.0] [--port 8080]
 
 Environment:
-    DEMO_HOST   — bind address (default 0.0.0.0)
-    DEMO_PORT   — bind port    (default 8080)
+    PORT             — bind port (highest priority, matches Fly convention)
+    AGENT_TOOLS_PORT — bind port (fallback)
+    DEMO_HOST        — bind address (default 0.0.0.0)
     AGENT_DEMO_TOKEN_SHA256 — override token digest for testing
 """
 
@@ -18,23 +19,20 @@ import argparse
 import json
 import os
 import re
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from agent.catalog import IMPLEMENTED_TOOLS, TOOL_DESCRIPTIONS, TOOL_COLUMNS
-from agent.demo_data import AgentToken, resolve_demo_token, rows_for
-from agent.refuse import (
-    AuthorizedCall,
-    Refusal,
-    authorize,
-    check_site_scope,
-    check_tool_allowed,
-    validate_params,
-)
+from agent.demo_data import resolve_demo_token, rows_for
+from agent.refuse import AuthorizedCall, Refusal, authorize
 
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8080
+
+# Anchor date for deterministic retention checks against fixture rows (2026-07-10).
+_ANCHOR_DATE = date(2026, 7, 10)
 
 _BEARER = re.compile(r"^\s*Bearer\s+(\S+)\s*$", re.IGNORECASE)
 
@@ -70,50 +68,6 @@ def _http_status_for(refusal: Refusal) -> int:
     if refusal.code in ("schema_validation", "retention_exceeded"):
         return 400
     return 403
-
-
-def _authorize_demo(
-    token: AgentToken,
-    tool_name: str,
-    raw_params: dict[str, Any] | None,
-) -> AuthorizedCall | Refusal:
-    """Run refusal checks against a demo AgentToken.
-
-    Reuses the real policy layer (agent.refuse) — the only difference from the
-    production path is that the token comes from demo_data, not Postgres.
-    """
-    # check_tool_allowed and check_site_scope work on duck-typed AgentToken;
-    # the demo AgentToken has the same .allowed_tools and .site_ids attributes.
-    refused = check_tool_allowed(token, tool_name)  # type: ignore[arg-type]
-    if refused is not None:
-        return refused
-
-    if tool_name not in IMPLEMENTED_TOOLS:
-        return Refusal(
-            code="tool_not_allowed",
-            reason=f"Tool {tool_name!r} is not implemented on the demo server.",
-            suggestion=f"Retry with one of: {', '.join(repr(t) for t in IMPLEMENTED_TOOLS)}.",
-        )
-
-    params = validate_params(raw_params)
-    if isinstance(params, Refusal):
-        return params
-
-    refused = check_site_scope(token, params.site_ids)  # type: ignore[arg-type]
-    if refused is not None:
-        return refused
-
-    if params.site_ids is None:
-        bound = sorted({int(s) for s in token.site_ids})
-    else:
-        bound = sorted({int(s) for s in params.site_ids})
-
-    return AuthorizedCall(
-        tool_name=tool_name,
-        site_ids=bound,
-        date_from=params.date_from,
-        date_to=params.date_to,
-    )
 
 
 class DemoHandler(BaseHTTPRequestHandler):
@@ -155,21 +109,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         if path == "/tools":
             bearer = _bearer(self)
             if bearer is None:
-                # Unauthenticated: return schema-level manifest (no scoping)
-                self._json(
-                    200,
-                    {
-                        "tools": [
-                            {
-                                "name": t,
-                                "description": TOOL_DESCRIPTIONS[t],
-                                "columns": list(TOOL_COLUMNS[t]),
-                            }
-                            for t in IMPLEMENTED_TOOLS
-                        ],
-                        "dataset": "fixture",
-                    },
-                )
+                self._json(401, {"error": "missing_bearer_token"})
                 return
 
             token = resolve_demo_token(bearer)
@@ -191,6 +131,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                     ],
                     "token_label": token.label,
                     "site_ids": list(token.site_ids),
+                    "expires_at": token.expires_at.isoformat(),
                     "dataset": "fixture",
                 },
             )
@@ -215,7 +156,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 return
 
             raw_params = _params_from_qs(parse_qs(parsed.query))
-            decision = _authorize_demo(token, tool_name, raw_params)
+            decision = authorize(token, tool_name, raw_params, today=_ANCHOR_DATE)  # type: ignore[arg-type]
 
             if isinstance(decision, Refusal):
                 body = decision.as_dict()
@@ -260,10 +201,15 @@ def main(argv: list[str] | None = None) -> int:
         "--host",
         default=os.environ.get("DEMO_HOST", DEFAULT_HOST),
     )
+    _port_default = int(
+        os.environ.get("PORT")
+        or os.environ.get("AGENT_TOOLS_PORT")
+        or DEFAULT_PORT
+    )
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("DEMO_PORT", str(DEFAULT_PORT))),
+        default=_port_default,
     )
     args = parser.parse_args(argv)
 
