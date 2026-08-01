@@ -32,9 +32,11 @@ echo "==> dagster job execute cinema_ops_transform (dbt silver + gold)"
 dagster job execute -m orchestration.definitions -j cinema_ops_transform
 echo "SEED OK (dagster path)"
 
-echo "==> re-apply agent role grants (covers dbt-created tables)"
+echo "==> re-apply agent / api role grants (covers dbt-created tables)"
 psql_cmd -f sql/init/005_agent_role.sql
 psql_cmd -f sql/init/005_agent_reader_role.sql
+# VDE-38 api role lands on main; dbt materialize drops its SELECT grants too.
+psql_cmd -f sql/init/005_api_role.sql
 
 echo "==> verify agent_reader kill-test"
 psql_cmd -f sql/init/006_prove_agent_reader_grants.sql
