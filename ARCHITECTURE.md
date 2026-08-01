@@ -83,6 +83,7 @@ Failure modes I can name, have decided not to handle in this build, and can defe
 | `cinema_ops` | hard deletes — a row vanishes with nothing to detect it by | source system is append-mostly for the tables in scope | periodic full reconciliation, or CDC instead of watermark reads |
 | ticketing events | out-of-order arrival across partitions | event ordering is not load-bearing for the facts modelled here | event-time windowing with a lateness allowance |
 | landing files | partial file read — file consumed while still being written | _(unfilled — see section 8)_ | atomic rename / marker file convention with the producer |
+| public demo (Fly.io) | fixture data diverges from production schema | the demo is illustrative only; it carries `"dataset":"fixture"` on every response and `X-Cinema-Ops-Dataset: fixture` header | retire the demo or wire it to a read replica once production schema is stable |
 
 ### 2c. The three clocks — why `cinema_ops` re-reads five minutes
 
@@ -579,4 +580,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-08-01 | `docker compose up` from a clean clone brings up the full seeded stack — db, Redpanda, seed, Dagster, agent-tools | manual `docker run` per service | one command from a clean clone is the only developer experience that compounds; each subsequent reviewer does not have to discover the startup sequence (VDE-49) |
 | 2026-08-01 | CI on GitHub Actions — ruff, mypy, unit, then integration + dbt build on an ephemeral Postgres service | no CI, or proofs run only locally | the proof scripts already existed; what was missing was a machine that runs them where nobody can quietly not run them. Does not reverse ADR-010 — docker-compose stays the reference environment; the runner executes the same proofs |
 | 2026-08-01 | secrets proven absent by classifying every credential-shaped match in full history; `.env.example` blank-valued | rewrite history, or trust a hosted scanner | the count can only grow, so the gate is *unaccounted: 0*; rewriting history to make a grep read zero would destroy the trail the grep exists to protect (ADR-014 / VDE-51) |
-
+| 2026-08-01 | stdlib-only public demo on Fly.io with fixture data; real policy layer reused; no DB in image | extend the local docker-compose surface to the internet | ADR-015: the demo illustrates the policy without exposing the warehouse; ADR-010's "locally operable" rule applies to the primary runtime, not a read-only illustration |

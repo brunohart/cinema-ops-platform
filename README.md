@@ -353,6 +353,7 @@ pytest -q                       # the whole suite
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
+| public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
 
 
 > [!WARNING]
@@ -432,6 +433,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
 | [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
+| [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
 
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
@@ -519,6 +521,11 @@ dbt/
 
 mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
 evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
+Dockerfile.demo            stdlib-only Fly demo image; no pip install; USER 10001 (VDE-54)
+fly.toml                   Fly.io app config for cinema-ops-platform-demo (uses Dockerfile.demo)
+src/agent/demo_server.py   public demo server (VDE-54); reuses real policy layer
+src/agent/demo_data.py     fixture rows + demo token table (sha256-keyed)
+src/agent/catalog.py       tool names, descriptions, columns, PII-absent list (stdlib)
 
 scripts/
   seed_platform.sh         runs inside the compose seed service: dagster job execute
@@ -527,11 +534,58 @@ scripts/
   prove_clean_clone.sh     end-to-end proof: git clone → cp .env.example .env →
                            docker compose up → fct_booking_rows > 0 (grain-checked) →
                            PROOF OK; also asserts seed log shows dagster path
+  prove_public_demo.sh     public demo surface proof (stdlib-only, no Postgres)
   (other scripts)          one proof command per claim
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
 ```
+
+---
+
+## Poke it from your phone
+
+The bearer-scoped tool surface can be run locally (stdlib only, no Postgres) and deployed to Fly.io
+as a read-only fixture demo once `scripts/deploy_fly.sh` runs with a Fly account.
+Token `cinema-ops-demo-2026-08-01` is scoped to two sites (1 and 2), three tools, and expires
+2026-08-31. The token is safe to publish: scoping is enforced server-side and the surface only ever
+reaches fixture rows — safety is scope, not secrecy.
+
+**Run locally first:**
+
+```bash
+PYTHONPATH=src python3 -m agent.demo_server --host 127.0.0.1 --port 8080
+```
+
+```bash
+# List sessions — scoped bearer returns rows, dataset=fixture
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  http://127.0.0.1:8080/tools/list_sessions | python3 -m json.tool
+
+# No bearer → 401 missing_bearer_token
+curl -s http://127.0.0.1:8080/tools/list_sessions | python3 -m json.tool
+
+# Out-of-scope site 3 → 403 site_scope (token is scoped to sites 1–2)
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  "http://127.0.0.1:8080/tools/list_sessions?siteIds=3" | python3 -m json.tool
+
+# Tool manifest — bearer required
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  http://127.0.0.1:8080/tools | python3 -m json.tool
+```
+
+**After `scripts/deploy_fly.sh` runs with a Fly account** (not yet deployed — `deploy_fly.sh` exits 2
+without `flyctl` in `PATH`), the same curls point at:
+
+```
+https://cinema-ops-platform-demo.fly.dev/tools/list_sessions
+```
+
+Every response carries `X-Cinema-Ops-Dataset: fixture` and `"dataset":"fixture"` — the demo cannot
+be mistaken for live data. No Postgres, no secrets on the Fly app. The same policy layer
+(`agent.refuse`) enforces the scoping rules as the local docker-compose environment
+([ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+supplements [ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)).
 
 ---
 
@@ -547,6 +601,8 @@ An artefact built to be operated and defended completely, not a demonstration of
   model ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)). At genuine scale this choice does not
   hold, and the honest answer is a columnar engine — which the medallion layering ports to largely
   intact.
+- The public Fly demo illustrates the policy in the browser; [ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+  records why this does not contradict ADR-010 — the demo is a fixture illustration, not the managed-cloud primary runtime ADR-010 ruled out.
 
 ## What this does not claim
 

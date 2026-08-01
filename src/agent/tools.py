@@ -22,10 +22,11 @@ from typing import Any, Sequence
 import psycopg
 from psycopg.rows import dict_row
 
+from agent.catalog import GET_SITE_PERFORMANCE  # noqa: F401 — re-exported for server.py
+
 
 # Token-scoped HTTP tool (VDE-41 / VDE-45). Kept alongside the VDE-48 red-team
 # surface; the Bearer tools server binds site scope before calling this.
-GET_SITE_PERFORMANCE = "get_site_performance"
 
 _SITE_PERFORMANCE_COLUMNS = (
     "site_id",
