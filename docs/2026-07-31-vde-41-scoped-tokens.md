@@ -14,7 +14,7 @@ a property of the system rather than an aspiration in a README.
 
 ## The move
 
-`sql/meta/003_agent_tokens.sql`:
+`sql/meta/004_agent_tokens.sql`:
 
 ```sql
 CREATE TABLE meta.agent_tokens (
