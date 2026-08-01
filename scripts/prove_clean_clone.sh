@@ -129,13 +129,50 @@ fi
 
 echo ""
 echo "==> grain check (inside db container)"
-docker compose -p "${PROJECT}" exec -T db \
-  psql -U cinema -d cinema_ops -v ON_ERROR_STOP=1 <<'SQL'
-SELECT 'fct_booking grain' AS check,
-       count(*) AS rows,
-       count(DISTINCT booking_id) AS grain_keys
-FROM gold.fct_booking;
-SQL
+GRAIN_ROWS=$(docker compose -p "${PROJECT}" exec -T db \
+  psql -U cinema -d cinema_ops -Atc "SELECT count(*) FROM gold.fct_booking;")
+GRAIN_KEYS=$(docker compose -p "${PROJECT}" exec -T db \
+  psql -U cinema -d cinema_ops -Atc "SELECT count(DISTINCT booking_id) FROM gold.fct_booking;")
+echo "  fct_booking grain: rows=${GRAIN_ROWS} grain_keys=${GRAIN_KEYS}"
+if [[ "${GRAIN_ROWS:-0}" -le 0 ]]; then
+  echo "FAIL: fct_booking is empty (grain check)" >&2
+  exit 1
+fi
+if [[ "${GRAIN_ROWS}" != "${GRAIN_KEYS}" ]]; then
+  echo "FAIL: grain violation — rows=${GRAIN_ROWS} != grain_keys=${GRAIN_KEYS} (duplicate booking_id)" >&2
+  exit 1
+fi
+
+echo ""
+echo "==> poll dagster and agent-tools to healthy (max 120s)"
+HEALTH_DEADLINE=$(( $(date +%s) + 120 ))
+while true; do
+  NOW=$(date +%s)
+  DAGSTER_HEALTH=$(docker inspect \
+    "$(docker compose -p "${PROJECT}" ps -q dagster 2>/dev/null)" \
+    --format '{{.State.Health.Status}}' 2>/dev/null || echo "")
+  AGENT_TOOLS_HEALTH=$(docker inspect \
+    "$(docker compose -p "${PROJECT}" ps -q agent-tools 2>/dev/null)" \
+    --format '{{.State.Health.Status}}' 2>/dev/null || echo "")
+  echo "  $(date '+%H:%M:%S') dagster=${DAGSTER_HEALTH} agent-tools=${AGENT_TOOLS_HEALTH}"
+  if [[ "${DAGSTER_HEALTH}" == "healthy" && "${AGENT_TOOLS_HEALTH}" == "healthy" ]]; then
+    break
+  fi
+  if [[ $NOW -gt $HEALTH_DEADLINE ]]; then
+    echo "WARNING: dagster or agent-tools did not reach healthy within 120s (non-blocking)" >&2
+    break
+  fi
+  sleep 5
+done
+
+echo ""
+echo "==> seed log — assert dagster path"
+SEED_LOG=$(docker compose -p "${PROJECT}" logs seed 2>&1)
+echo "${SEED_LOG}" | tail -20
+if ! echo "${SEED_LOG}" | grep -q 'SEED OK (dagster path)'; then
+  echo "FAIL: seed log does not contain 'SEED OK (dagster path)' — dagster did not run" >&2
+  exit 1
+fi
 
 echo ""
 echo "==> second pass without .env (data persists; host psql uses explicit port)"
@@ -152,4 +189,4 @@ fi
 echo ""
 echo "PROOF OK"
 echo "  fct_booking_rows=${COUNT_EXEC}"
-echo "  db: healthy  seed: exited 0  redpanda: healthy (via compose ps above)"
+echo "  db: healthy  seed: exited 0  grain: rows=${GRAIN_ROWS} grain_keys=${GRAIN_KEYS}  dagster: ${DAGSTER_HEALTH:-unknown}  agent-tools: ${AGENT_TOOLS_HEALTH:-unknown}"
