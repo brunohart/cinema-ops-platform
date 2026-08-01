@@ -342,6 +342,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold star schema — dims with surrogates, facts with keys + measures only; zero orphan `film_key` | `./scripts/prove-gold.sh` | [recorded](docs/2026-07-31-vde-25-gold-proof.md) — `PASS=35`, orphans `0` |
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
+| append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -414,6 +415,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | in flight |
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
+| [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
 
 That last row is the only one with no issue id, and it stays visibly empty rather than being filled
@@ -476,7 +478,8 @@ src/
 workspace.yaml             dagster dev code location → orchestration.definitions
 
 sql/
-  init/001_schemas.sql     bronze · silver · gold
+  init/001_schemas.sql     bronze · silver · gold · meta
+  meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
   bronze/001_quarantine.sql     raw_payload is the point
