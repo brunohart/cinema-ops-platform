@@ -17,7 +17,11 @@ from dagster import Definitions
 from dagster_dbt import DbtCliResource
 from psycopg.rows import dict_row
 
-from orchestration.dbt_assets import DBT_PROJECT_DIR, cinema_ops_dbt_assets, dbt_cli_resource_for_dsn
+from orchestration.dbt_assets import (
+    DBT_PROJECT_DIR,
+    cinema_ops_dbt_assets,
+    dbt_cli_resource_for_dsn,
+)
 from orchestration.definitions import cinema_ops_transform_job
 
 

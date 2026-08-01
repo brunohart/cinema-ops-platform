@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-07-31
-**Revision count:** 6
+**Last revised:** 2026-08-01
+**Revision count:** 7
 
 ---
 
@@ -83,7 +83,7 @@ Failure modes I can name, have decided not to handle in this build, and can defe
 | `cinema_ops` | hard deletes — a row vanishes with nothing to detect it by | source system is append-mostly for the tables in scope | periodic full reconciliation, or CDC instead of watermark reads |
 | ticketing events | out-of-order arrival across partitions | event ordering is not load-bearing for the facts modelled here | event-time windowing with a lateness allowance |
 | landing files | partial file read — file consumed while still being written | _(unfilled — see section 8)_ | atomic rename / marker file convention with the producer |
-| grants | a gold table created by `transformer` carries no `api` grant until `008_api_role.sql` is re-run | a default privilege would grant the next PII-bearing gold table to `api` by default — failing closed is the correct direction (ADR-014) | an event trigger granting `SELECT` on `CREATE TABLE` with a PII-column denylist |
+| grants | a gold table created by `transformer` carries no `api` grant until `008_api_role.sql` is re-run | a default privilege would grant the next PII-bearing gold table to `api` by default — failing closed is the correct direction (ADR-015) | an event trigger granting `SELECT` on `CREATE TABLE` with a PII-column denylist |
 
 ### 2c. The three clocks — why `cinema_ops` re-reads five minutes
 
@@ -567,4 +567,6 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-07-30 | `booking_id` on the ticket fact as a degenerate dimension; `booking_total` derived | store the booking total on each ticket row | an identifier isn't summed so it can't fan out; a derived number cannot drift from the rows it sums |
 | 2026-07-31 | quarantine bad rows into `bronze.quarantine` with `raw_payload`; batch continues | drop bad rows, or fail the whole batch | drop destroys evidence; fail-batch lets one bad row block a thousand good ones; quarantine is the only option that survives review (ADR-011 / VDE-14) |
 | 2026-07-31 | issues run plan (Opus) → implement (Sonnet) → verify (Opus), each phase recorded in an append-only ledger | one agent with a longer prompt | an agent that plans and builds in one breath never treats the design as a separable artefact, and one that checks its own work reads what it meant; the ledger is the only thing that carries between runs (ADR-013) |
-| 2026-08-01 | three least-privilege Postgres roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold (no PII columns) | one shared owner role | each role's blast radius is bounded at the grant boundary — a bug in dbt cannot corrupt bronze, a compromised serving credential cannot write anything and cannot read a name (ADR-014) |
+| 2026-08-01 | CI on GitHub Actions — ruff, mypy, unit, then integration + dbt build on an ephemeral Postgres service | no CI, or proofs run only locally | the proof scripts already existed; what was missing was a machine that runs them where nobody can quietly not run them. Does not reverse ADR-010 — docker-compose stays the reference environment; the runner executes the same proofs |
+| 2026-08-01 | secrets proven absent by classifying every credential-shaped match in full history; `.env.example` blank-valued | rewrite history, or trust a hosted scanner | the count can only grow, so the gate is *unaccounted: 0*; rewriting history to make a grep read zero would destroy the trail the grep exists to protect (ADR-014 / VDE-51) |
+| 2026-08-01 | three least-privilege Postgres roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold (no PII columns) | one shared owner role | each role's blast radius is bounded at the grant boundary — a bug in dbt cannot corrupt bronze, a compromised serving credential cannot write anything and cannot read a name (ADR-015) |

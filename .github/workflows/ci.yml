@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: lint, typecheck, unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync the locked environment
+        run: uv sync --frozen --extra dev --extra dbt
+      - name: Put the venv on PATH
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: ruff
+        run: ruff check .
+      - name: mypy
+        if: ${{ !cancelled() }}
+        run: mypy src
+      - name: pytest (unit — integration marker excluded)
+        if: ${{ !cancelled() }}
+        run: pytest -m "not integration" -q --junitxml=junit-unit.xml
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-unit-${{ github.run_id }}
+          path: junit-unit.xml
+          retention-days: 14
+
+  integration:
+    name: integration + dbt build (ephemeral Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: cinema
+          POSTGRES_PASSWORD: cinema
+          POSTGRES_DB: cinema_ops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cinema -d cinema_ops"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DB: postgresql://cinema:cinema@localhost:5432/cinema_ops
+      PGPASSWORD: cinema
+      DBT_HOST: localhost
+      DBT_PORT: '5432'
+      DBT_USER: cinema
+      DBT_PASSWORD: cinema
+      DBT_DBNAME: cinema_ops
+      DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync the locked environment
+        run: uv sync --frozen --extra dev --extra dbt
+      - name: Put the venv on PATH
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Ensure psql
+        run: command -v psql || (sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client)
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U cinema -d cinema_ops && exit 0
+            sleep 2
+          done
+          echo "postgres service never became ready" >&2
+          exit 1
+      - name: Apply bronze DDL
+        run: |
+          for f in \
+            sql/init/001_schemas.sql \
+            sql/bronze/001_quarantine.sql \
+            sql/bronze/002_quarantine_grants.sql \
+            sql/001_bronze.sql \
+            sql/meta/001_watermarks.sql \
+            sql/cinema_ops/001_bookings.sql \
+            sql/bronze/003_raw_cinema_ops.sql \
+            sql/bronze/003_events_raw.sql \
+            sql/bronze/004_events_raw_grants.sql \
+            sql/bronze/005_raw_tmdb.sql \
+            sql/bronze/005_film_raw.sql ; do
+            echo "== $f"
+            psql "$DB" -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+      - name: Create the idempotency test database
+        run: psql "$DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE cinema_ops_test"
+      - name: dbt deps
+        working-directory: dbt
+        run: dbt deps
+      - name: Seed bronze and build gold (scripts/prove-gold.sh)
+        run: ./scripts/prove-gold.sh
+      - name: dbt build (models + tests, whole project)
+        working-directory: dbt
+        run: dbt build
+      - name: Fail on any dbt model or test failure
+        if: ${{ !cancelled() }}
+        run: python3 scripts/check_dbt_results.py dbt/target/run_results.json
+      - name: pytest (idempotency, service Postgres)
+        env:
+          CINEMA_TEST_DATABASE_URL: postgresql://cinema:cinema@localhost:5432/cinema_ops_test
+        run: pytest tests/test_idempotency.py -q
+      - name: pytest (integration, testcontainers)
+        run: pytest -m integration -q
+      - name: Upload dbt artefacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-target-${{ github.run_id }}
+          path: |
+            dbt/target/
+            dbt/logs/
+          retention-days: 14
+          if-no-files-found: warn

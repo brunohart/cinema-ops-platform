@@ -2,7 +2,7 @@
 
 **Status:** living record. One ADR per real choice, written at the moment the choice was made.
 **Started:** 2026-07-30
-**Last revised:** 2026-08-01 (ADR-014)
+**Last revised:** 2026-08-01 (ADR-015)
 **Companion to:** `ARCHITECTURE.md` — that file states what the system is, this one states why it is
 that and not something else.
 
@@ -448,7 +448,49 @@ promote aggressively into `CLAUDE.md` and truncate, not to keep injecting more.
 
 ---
 
-## ADR-014 — Three least-privilege roles on the write path, and grants enumerated rather than defaulted
+## ADR-014 — Prove secrets absent by classification, not by rewriting history
+
+**Status** Accepted · 2026-08-01
+
+**Context** The repository is public. The history contained commented-out credential-shaped lines
+in `.env.example` and ADR-010 local-dev identities (`cinema:cinema`, `agent_reader:agent_reader`)
+embedded in compose files, dbt profiles, and prove scripts. Running the issue's grep over full
+history returns a non-zero count for structural reasons — not because real secrets were ever
+committed — and that count can only grow as more code is added. The naive response is to chase
+zero by rewriting history, but CLAUDE.md rule one is that the audit trail starts at commit one and
+is never rewritten. The other naive response is to trust a hosted scanning service, but that scanner
+is invisible on a clean clone and does not satisfy "done is a green exit code on a clean clone."
+
+**Decision** An in-repo stdlib-only classifier (`scripts/scan_secrets.py`) runs over full git history
+and the working tree, classifying every credential-shaped match by **value shape only** — never by
+file path, because a path exclusion is how a real secret hides in an allowlisted file. Exit code 0
+means Tier A (provider-shaped credentials) hits zero and Tier B (secret-named assignments) unaccounted
+hits zero. The gate is therefore `unaccounted: 0`, not `count: 0`. A blank-valued `.env.example`
+documents every key the code reads; `secret-scan.yml` runs the proof on every push and pull request
+with `fetch-depth: 0` (a shallow clone would turn the history scan into a false green).
+
+**Alternatives rejected** History rewrite with `git filter-repo` or BFG — destroys an audit trail
+that starts at commit one for credentials that were never leaked. A managed scanning service
+(GitHub Secret Scanning, truffleHog, Gitleaks) — invisible on a clean clone, so it cannot satisfy
+the "green exit code on a clean clone" proof requirement, and adds an external dependency to a
+repository whose instinct is ADR-010: operate locally, verify locally.
+
+**Consequences** The accounting rules in `scan_secrets.py` require maintenance: a novel provider
+credential shape is a false negative until its Tier A pattern is added. Likewise, a new structural
+pattern in the codebase may land in Tier B unaccounted until a value-shape reason is added. The
+file is committed and diffed like code, so additions are reviewable. If the accounting list grows
+past roughly a dozen entries the codebase, not the scanner, is the problem — that would be the
+signal to audit what the code is doing with credential-shaped names.
+
+**What would change my mind** A genuinely leaked third-party credential anywhere in history — at
+that point rotation (at the provider first) then `git filter-repo` then a §7 field correction is
+the right path, and this ADR would record the reversal. Or the accounting table growing past
+roughly a dozen entries with no corresponding code cleanup — that would mean the classification
+approach has become taxonomy rather than proof.
+
+---
+
+## ADR-015 — Three least-privilege roles on the write path, and grants enumerated rather than defaulted
 
 **Status** Accepted · 2026-08-01
 
@@ -461,7 +503,10 @@ structural control that a filter is not. This ADR applies that same principle to
 path, not just the read path.
 
 The agent path already has enumerated per-table grants (`agent`, `agent_reader` — VDE-42/48).
-This ADR adds the write-path counterparts: `extractor`, `transformer`, and `api`.
+VDE-38 already introduced a read-only `api` role (`sql/init/005_api_role.sql`) for the Hono
+agent-api. This ADR completes the write-path counterparts — `extractor`, `transformer`, and
+the `api` extensions in `008_api_role.sql` (column-scoped `dim_customer`, default-privilege
+revokes for the transformer owner).
 
 **Decision** Three roles, three schemas, three blast radii.
 
@@ -492,7 +537,9 @@ creates schemas (`silver_dbt_test__audit`, `gold_dbt_test__audit`) and requires 
 Ownership handover for pre-existing gold tables is wrapped in an exception handler so it
 degrades to `NOTICE` rather than aborting compose init. The per-table enumeration on `api`
 means a new gold table is invisible to `api` until `008` is re-run; the documentation for
-this gap is the cost.
+this gap is the cost. Compose mounts both `005_api_role.sql` (VDE-38 allow-list) and
+`008_api_role.sql` (VDE-52 extensions); both are idempotent and the later file adds the
+column-scoped `dim_customer` grant and the `FOR ROLE transformer` default-privilege revokes.
 
 `dbt build --target transformer` is the runnable path for executing dbt as the `transformer`
 role. The default dbt target remains `local` (the `cinema` owner DSN) so existing prove

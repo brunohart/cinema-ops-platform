@@ -81,7 +81,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE transformer IN SCHEMA gold
 -- A default privilege would grant api full-row access to the next PII-bearing gold table
 -- the moment it is created by any role. The cost is that a new gold table is invisible to
 -- api until this file is re-run. That is failing closed — the secure direction — and it is
--- recorded in ARCHITECTURE §2b. (ADR-014)
+-- recorded in ARCHITECTURE §2b. (ADR-015)
 
 -- Allow the migration-owner session to SET ROLE api in kill tests and prove scripts.
 DO $$
