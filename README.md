@@ -340,6 +340,9 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | four extractors are Dagster assets; lineage edges are function-argument deps | `./scripts/prove_dagster_assets.sh` then `dagster dev -w workspace.yaml` | [recorded](docs/2026-07-31-vde-22-dagster-assets.md) — 10 assets, 9 edges |
 | silver models type, rename, and dedupe bronze on natural key | `./scripts/prove-silver.sh` | [recorded](docs/2026-07-31-vde-24-silver-proof.md) — `PASS=12` |
 | gold star schema — dims with surrogates, facts with keys + measures only; zero orphan `film_key` | `./scripts/prove-gold.sh` | [recorded](docs/2026-07-31-vde-25-gold-proof.md) — `PASS=35`, orphans `0` |
+| gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
+| no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
+| append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -410,6 +413,8 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#8](https://github.com/brunohart/cinema-ops-platform/pull/8) | VDE-17 | `cinema_ops` clock skew — `SAFETY_LAG` overlap on incremental reads | in flight |
 | [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | in flight |
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
+| — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
+| [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 
 ### Specified, not yet built
@@ -435,6 +440,7 @@ its tool set · the evaluation layer, including adversarial prompt-injection tes
 ARCHITECTURE.md            what the system is — living, revised, never tidied
 DECISIONS.md               ADR-001…011, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
+RUNBOOK.md                 three likely failures — symptom first, then what on-call does
 docker-compose.yml         Postgres 16, DDL applied at init — the reference environment
 
 src/
@@ -450,14 +456,16 @@ src/
 workspace.yaml             dagster dev code location → orchestration.definitions
 
 sql/
-  init/001_schemas.sql     bronze · silver · gold
+  init/001_schemas.sql     bronze · silver · gold · meta
+  meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
-  init/005_api_role.sql    SELECT-only api role over gold allow-list
+  init/005_agent_role.sql  SELECT-only agent role; no grant on dim_customer PII
+  init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
 
-agent-api/                 Hono read path — fixed endpoints, connects as api
+agent-api/                 allowlisted queries + Hono read path (no SQL door)
 
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors

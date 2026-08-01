@@ -1,21 +1,31 @@
 # agent-api
 
-**VDE-38 · ADR-009** — Hono read path over the gold layer.
+Bounded agent read path over gold (ADR-009).
 
-An agent is a consumer with no judgement. This service is the boundary that
-cannot live in the prompt: a fixed set of named, parameterised, read-only
-endpoints. There is no endpoint that accepts SQL.
+| layer | issue | what |
+|-------|-------|------|
+| `src/` | VDE-39 / VDE-42 | allowlisted `QUERIES`, bind/execute, PII-absent output shapes |
+| `server/` | VDE-38 | Hono HTTP surface — fixed endpoints, no SQL passthrough |
+| DB roles | VDE-38 / VDE-42 | `api` (Hono) and `agent` (tool grants); both SELECT-only on gold |
 
-## Run
+An agent is a consumer with no judgement. There is no endpoint that accepts SQL.
+
+## Library (`src/`)
 
 ```bash
-# Postgres up, schemas + gold seed + api role applied (see scripts/prove-agent-api.sh)
+cd agent-api && npm install && npm run typecheck
+npm run prove              # VDE-39 closed allowlist
+npm run prove-pii-absent   # VDE-42 shapes + grants
+```
+
+## HTTP server (`server/`)
+
+```bash
+# Postgres up; gold seed + api role applied (see scripts/prove-agent-api.sh)
 export DATABASE_URL=postgresql://api:api@localhost:5432/cinema_ops
 cd agent-api && npm install && npm start
 # listens on :8787
 ```
-
-## Endpoints
 
 | method | path | purpose |
 |--------|------|---------|
@@ -28,6 +38,7 @@ cd agent-api && npm install && npm start
 
 ## Security model
 
-1. **Absence of a SQL door** — the primary control.
-2. **DB role `api`** — SELECT on an allow-listed gold set; not superuser; no bronze/silver.
-3. **Zod response shapes** — PII fields are not in the type; a column no code path selects cannot leak.
+1. **Absence of a SQL door** — the primary control on the HTTP surface.
+2. **Closed `QUERIES` allowlist** — the only SQL the library can run.
+3. **DB roles** — SELECT on agent-safe gold; no bronze/silver write path.
+4. **Response shapes** — PII fields are not in the type; a column no code path selects cannot leak.

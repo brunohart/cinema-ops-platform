@@ -2,12 +2,23 @@
   "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "VDE-38 — Hono read path over gold. Fixed endpoints; no SQL passthrough.",
+  "description": "Allowlisted agent read path + Hono HTTP surface over gold (VDE-38 / VDE-39 / VDE-42 / ADR-009)",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./queries": "./dist/queries.js",
+    "./schemas": "./src/schemas.ts"
+  },
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx watch server/index.ts",
+    "start": "tsx server/index.ts",
+    "prove": "bash ../scripts/prove_allowlisted_queries.sh",
+    "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh",
+    "prove-http": "bash ../scripts/prove-agent-api.sh"
   },
   "engines": {
     "node": ">=20"

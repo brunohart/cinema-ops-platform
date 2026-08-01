@@ -1,8 +1,14 @@
 .DS_Store
 .claude/
 __pycache__/
+
+# agent-api (VDE-39)
+agent-api/node_modules/
+agent-api/dist/
+
 *.py[cod]
 .pytest_cache/
+.coverage
 .ruff_cache/
 *.egg-info/
 .venv/
@@ -19,7 +25,7 @@ storage/
 logs/
 compute_logs/
 
-# agent-api (VDE-38)
+# agent-api (VDE-38 / VDE-39)
 agent-api/node_modules/
 agent-api/dist/
 

@@ -9,8 +9,9 @@
 - `sql/init/005_api_role.sql` — login role `api`, not superuser / createdb; SELECT
   allow-list on agent-safe gold tables; no bronze / silver / meta foothold.
 - `sql/init/006_prove_api_grants.sql` — grant assertions.
-- `agent-api/` — Hono + `postgres` + zod; connects as `api`; fixed endpoints
-  `/health`, `/films`, `/bookings`, `/showtimes`. `/query` and `/sql` return 404.
+- `agent-api/server/` — Hono + `postgres` + zod; connects as `api`; fixed
+  endpoints `/health`, `/films`, `/bookings`, `/showtimes`. `/query` and `/sql`
+  return 404. (Allowlist library stays in `agent-api/src/` — VDE-39 / VDE-42.)
 - `scripts/prove-agent-api.sh` — end-to-end proof on a clean Postgres.
 
 The absence of a SQL endpoint is the security model (ADR-009). Role grants and
@@ -25,7 +26,7 @@ response shapes are defence in depth.
  api     | f        | f
 (1 row)
 
-SQL-passthrough binders in agent-api/src: 0
+SQL-passthrough binders in agent-api/server: 0
 
 ==> GET /health
 {

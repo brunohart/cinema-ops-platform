@@ -1,62 +1,37 @@
-import { z } from "zod";
-
-/** Health — proves the process is up and which DB role it holds. */
-export const HealthSchema = z.object({
-  status: z.literal("ok"),
-  service: z.literal("agent-api"),
-  db_user: z.string(),
-  db_ready: z.literal(true),
-});
-export type Health = z.infer<typeof HealthSchema>;
-
-/** dim_film — public / internal attributes only (ARCHITECTURE §6b). */
-export const FilmSchema = z.object({
-  film_key: z.string(),
-  film_id: z.number().int(),
-  title: z.string().nullable(),
-  original_language: z.string().nullable(),
-  release_date: z.string().nullable(),
-  runtime_minutes: z.number().int().nullable(),
-  is_current: z.boolean(),
-});
-export type Film = z.infer<typeof FilmSchema>;
-
 /**
- * Booking summary from gold.fct_booking (scaffold seed or dbt model).
- * No customer_key, no seat_label, no PII — absence, not redaction.
+ * VDE-42 — agent tool output shapes.
+ *
+ * ARCHITECTURE §6c: PII fields are not in any agent tool's response shape.
+ * Not redacted — absent. A column that does not appear here cannot leak
+ * through the tool interface, regardless of what gold still holds.
+ *
+ * Cross-check against ARCHITECTURE §6b classification table:
+ *   PII on dim_customer → customer_email, customer_name, loyalty_number,
+ *   marketing_consent — none of those names exist in AGENT_OUTPUT_SCHEMAS.
+ *   pseudonym (customer_key) is also agent-excluded (§6a).
+ *   seat_label is never returned alongside a person key (§6d).
+ *
+ * Keys match `QUERIES` in queries.ts (VDE-39 allowlist).
  */
-export const BookingSchema = z.object({
-  booking_id: z.string(),
-  booking_total: z.number(),
-  channel: z.string().nullable().optional(),
-  channel_code: z.string().nullable().optional(),
-  ticket_count: z.number().int().nullable().optional(),
-  booked_at: z.string().nullable().optional(),
-});
-export type Booking = z.infer<typeof BookingSchema>;
 
-/** Showtime aggregate — commercial measures at cohort grain. */
-export const ShowtimePerformanceSchema = z.object({
-  showtime_key: z.string(),
-  cinema_id: z.string(),
-  screen_id: z.string(),
-  show_date: z.string(),
-  seats_sold: z.number().int(),
-  seats_capacity: z.number().int(),
-  gross_revenue: z.number(),
-});
-export type ShowtimePerformance = z.infer<typeof ShowtimePerformanceSchema>;
+/** site_performance — commercial aggregates only; no person grain. */
+export type SitePerformanceRow = {
+  site_name: string;
+  rev: number;
+  admits: number;
+};
 
-export const FilmsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(25),
-});
+/** Declared output schemas keyed by allowlisted query name. */
+export const AGENT_OUTPUT_SCHEMAS = {
+  site_performance: ["site_name", "rev", "admits"],
+} as const;
 
-export const BookingsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(25),
-  channel: z.string().min(1).max(64).optional(),
-});
-
-export const ShowtimesQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(25),
-  cinema_id: z.string().min(1).max(64).optional(),
-});
+/** Every classification-table PII / agent-excluded field — must not appear above. */
+export const CLASSIFICATION_AGENT_EXCLUDED = [
+  "customer_email",
+  "customer_name",
+  "loyalty_number",
+  "marketing_consent",
+  "customer_key",
+  "seat_label",
+] as const;

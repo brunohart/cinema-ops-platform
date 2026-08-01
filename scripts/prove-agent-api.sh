@@ -42,18 +42,18 @@ psql_owner -f sql/init/006_prove_api_grants.sql
 echo "==> confirm api role attributes"
 psql_owner -c "select rolname, rolsuper, rolcreatedb from pg_roles where rolname = 'api'"
 
-echo "==> static check: no SQL-passthrough route binders in agent-api/src"
+echo "==> static check: no SQL-passthrough route binders in agent-api/server"
 # Refuse patterns that would accept caller SQL into a query string.
 PATTERN='(c\.req\.(json|text|query).*sql)|(sql\s*[:=]\s*c\.req)|(execute\s*\(\s*c\.req)|(unsafe\s*\()'
 set +e
-matches="$(grep -rniE "${PATTERN}" agent-api/src || true)"
+matches="$(grep -rniE "${PATTERN}" agent-api/server || true)"
 set -e
 if [[ -n "${matches}" ]]; then
   printf '%s\n' "${matches}" >&2
-  echo "VDE-38 failed: agent-api appears to bind caller input into SQL" >&2
+  echo "VDE-38 failed: agent-api/server appears to bind caller input into SQL" >&2
   exit 1
 fi
-echo "SQL-passthrough binders in agent-api/src: 0"
+echo "SQL-passthrough binders in agent-api/server: 0"
 
 echo "==> npm install + start agent-api as role api"
 cd agent-api
