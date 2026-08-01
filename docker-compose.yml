@@ -27,6 +27,11 @@ services:
       - ./sql/bronze/005_raw_tmdb.sql:/docker-entrypoint-initdb.d/035_raw_tmdb.sql:ro
       - ./sql/bronze/005_film_raw.sql:/docker-entrypoint-initdb.d/035_film_raw.sql:ro
       - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
+      - ./sql/meta/002_agent_access_log.sql:/docker-entrypoint-initdb.d/050_agent_access_log.sql:ro
+      - ./sql/gold/002_dim_customer.sql:/docker-entrypoint-initdb.d/051_dim_customer.sql:ro
+      - ./sql/gold/003_agent_redteam_fixture.sql:/docker-entrypoint-initdb.d/052_agent_redteam_fixture.sql:ro
+      - ./sql/init/005_agent_reader_role.sql:/docker-entrypoint-initdb.d/053_agent_reader_role.sql:ro
+      - ./sql/init/006_prove_agent_reader_grants.sql:/docker-entrypoint-initdb.d/054_prove_agent_reader.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
