@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # prove_readme_structure.sh — machine checks for the VDE-53 README restructure.
 #
-# Eight checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
-# Ends with PASS=8 and exits 0 only when all eight pass.
+# Nine checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
+# Ends with PASS=9 and exits 0 only when all nine pass.
 #
 #   ./scripts/prove_readme_structure.sh
 #
@@ -189,8 +189,8 @@ echo "== 5. section-3 failure-mode table matches ARCHITECTURE.md §2 sources =="
 python3 - <<'PY' || exit 1
 import sys, re
 
-def extract_table_sources(filepath, section_marker):
-    """Return set of source-column values from the first markdown table after section_marker."""
+def extract_table_rows(filepath, section_marker):
+    """Return list of (source, how_it_fails) pairs from the first markdown table after section_marker."""
     lines = open(filepath).read().splitlines()
     start = None
     for i, ln in enumerate(lines):
@@ -201,7 +201,7 @@ def extract_table_sources(filepath, section_marker):
         print(f"  FAIL — section marker not found in {filepath}: {section_marker!r}", file=sys.stderr)
         sys.exit(1)
 
-    sources = set()
+    rows = []
     in_table = False
     for ln in lines[start:]:
         if re.match(r'^\|', ln):
@@ -214,37 +214,40 @@ def extract_table_sources(filepath, section_marker):
                 continue
             if re.match(r'^#', cells[0]) or cells[0] == '#':
                 continue  # header row with '#' column
-            # First cell is the row number, second is the source — for ARCHITECTURE.md with # column
-            # For README section 3 without # column — first cell is source
-            # We detect by whether first cell is purely numeric or '#'
-            if len(cells) >= 2:
-                src = cells[1] if re.match(r'^\d+[ab]?$', cells[0]) else cells[0]
-                src = src.strip('`').strip()
-                if src and src not in ('#', 'source', '---'):
-                    sources.add(src)
+            # First cell is row number, second is source, third is how_it_fails
+            if len(cells) >= 3 and re.match(r'^\d+[ab]?$', cells[0]):
+                src = cells[1].strip('`').strip()
+                how = cells[2].strip('`').strip()
+                if src and src not in ('source',):
+                    rows.append((src, how))
         elif in_table:
             break
-    return sources
+    return rows
 
-# ARCHITECTURE.md §2 table (has '# | source | ...' columns)
-arch_sources = extract_table_sources(ARCH := "ARCHITECTURE.md", "## 2. Failure modes")
+# ARCHITECTURE.md §2 table (has '# | source | how it fails | ...' columns)
+arch_rows = extract_table_rows("ARCHITECTURE.md", "## 2. Failure modes")
 
-# README section 3 table (has '# | source | ...' columns)
-readme_sources = extract_table_sources("README.md", "## What happens when a source breaks")
+# README section 3 table (has '# | source | how it fails | ...' columns)
+readme_rows = extract_table_rows("README.md", "## What happens when a source breaks")
 
-if arch_sources != readme_sources:
-    missing = arch_sources - readme_sources
-    extra = readme_sources - arch_sources
+arch_pairs = set(arch_rows)
+readme_pairs = set(readme_rows)
+
+if arch_pairs != readme_pairs:
+    missing = arch_pairs - readme_pairs
+    extra = readme_pairs - arch_pairs
     if missing:
-        print(f"  FAIL — sources in ARCHITECTURE.md §2 but missing from README section 3: {missing}", file=sys.stderr)
+        print(f"  FAIL — (source, failure) pairs in ARCHITECTURE.md §2 but missing from README section 3: {missing}", file=sys.stderr)
     if extra:
-        print(f"  FAIL — sources in README section 3 but not in ARCHITECTURE.md §2: {extra}", file=sys.stderr)
+        print(f"  FAIL — (source, failure) pairs in README section 3 but not in ARCHITECTURE.md §2: {extra}", file=sys.stderr)
     sys.exit(1)
 
-print(f"  ok   — section-3 sources match ARCHITECTURE.md §2 ({len(arch_sources)} rows)")
-PY
+if len(arch_rows) != len(readme_rows):
+    print(f"  FAIL — row count mismatch: ARCHITECTURE.md §2 has {len(arch_rows)}, README section 3 has {len(readme_rows)}", file=sys.stderr)
+    sys.exit(1)
 
-# ── check 6: quickstart block — one clone line, one script line, exists + executable ──
+print(f"  ok   — section-3 (source, failure) pairs match ARCHITECTURE.md §2 ({len(arch_rows)} rows)")
+PY
 echo "== 6. quickstart block — git clone, script line, exists and executable =="
 python3 - <<'PY' || exit 1
 import sys, re, os, stat
@@ -414,5 +417,41 @@ echo ""
 echo "== ./scripts/quickstart.sh --check =="
 ./scripts/quickstart.sh --check
 
+# ── check 9: below-fold sentinel phrases still present ────────────────────────
 echo ""
-echo "PASS=8"
+echo "== 9. below-fold sentinel phrases still appear =="
+python3 - <<'PY' || exit 1
+import sys, re
+
+text = open("README.md").read()
+
+# Find the below-fold marker
+fold_marker = "## Below the fold — the long form"
+fold_idx = text.find(fold_marker)
+if fold_idx == -1:
+    print(f"  FAIL — fold marker not found: {fold_marker!r}", file=sys.stderr)
+    sys.exit(1)
+
+below_fold = text[fold_idx:]
+
+sentinels = [
+    ("illegible", "illegible"),
+    ("essay is downstream", "essay is downstream"),
+    ("all-predicted", "all-predicted"),
+    ("Trustworthy data layer", "Trustworthy data layer"),
+]
+
+failed = False
+for label, phrase in sentinels:
+    if phrase not in below_fold:
+        print(f"  FAIL — sentinel phrase missing from below-fold: {label!r}", file=sys.stderr)
+        failed = True
+
+if failed:
+    sys.exit(1)
+
+print(f"  ok   — all {len(sentinels)} sentinel phrases present below the fold")
+PY
+
+echo ""
+echo "PASS=9"

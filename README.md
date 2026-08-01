@@ -81,6 +81,7 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
+- **`silver` and `gold` dbt transforms** (grain scaffold declared; models not yet written — see VDE-26) and **Dagster asset checks / SLAs** ([ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness)) — the next build increment.
 - **The MCP server itself** — the `meta.agent_access_log` store and the allowlisted query layer exist; the server that exposes them to a client does not. The interface is specified and the safety properties are structural; the wire protocol is the last mile.
 - **The evaluation layer beyond the VDE-48 synopsis-injection red-team fixture** — an injection-resistance claim with no test behind it is a hope with good posture. Adversarial prompt-injection testing is built alongside the pipeline rather than added later.
 - **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
@@ -228,10 +229,17 @@ sequenceDiagram
 implement `fetch()` and nothing else, so no source can forget the audit stamp, the quarantine path,
 or the watermark ordering.
 
+> [!NOTE]
+> If every row here is still `PREDICTED` by the end of Day 4, that is itself a finding — either
+> nothing is being genuinely exercised, or failures are happening and going unnoticed.
+> ([ARCHITECTURE §9](ARCHITECTURE.md#9-the-revision-ritual), the all-predicted rule.)
+
 </details>
 
 <details>
 <summary>Legible means governed — grain, classification, aggregate floor</summary>
+
+"Trustworthy data layer" is not a design. These are.
 
 ### Grain — the most load-bearing sentence in a model
 
@@ -328,6 +336,18 @@ with nothing installed but Python and git.
 
 <details>
 <summary>The documents are the artefact</summary>
+
+> Every cinema in the world runs on software that knows everything about it. Every ticket sold, every
+> seat held, every session scheduled, every transaction at the counter. The record is complete and it
+> is accurate.
+>
+> It is also, from anywhere outside the system that produced it, almost entirely illegible.
+
+This repository is the working proof behind that argument. The essay it belongs to is
+[**The Read Path**](docs/the-read-path.md); the line-by-line join between the two is
+[**the thesis map**](docs/thesis-map.md). Direction of dependency runs one way — **the repo is the
+source of truth, the essay is downstream.** When a decision here is reversed or a prediction is
+disproven, the essay is stale until it catches up.
 
 The architecture and decision records were written **before** the pipeline, deliberately: a problem
 written down in advance is a design constraint, and the same problem discovered in production is an
