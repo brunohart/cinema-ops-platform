@@ -156,8 +156,12 @@ echo "ok [server_starts_and_healthz]"
 
 # ── Section 5: list_sessions with valid bearer → 200, refused=false, fixture ──
 echo "=== section 5: list_sessions with valid bearer ==="
-RESP5="$(curl -s -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/list_sessions")"
+HTTP5="$(curl -s -o /tmp/resp5.json -w '%{http_code}' -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/list_sessions")"
+RESP5="$(cat /tmp/resp5.json)"
 echo "$RESP5"
+if [[ "$HTTP5" != "200" ]]; then
+  fail "section 5: expected HTTP 200, got $HTTP5"
+fi
 REFUSED="$(echo "$RESP5" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('refused'))")"
 if [[ "$REFUSED" != "False" ]]; then
   fail "section 5: expected refused=False, got $REFUSED"
@@ -180,8 +184,12 @@ echo "ok [list_sessions_valid_bearer]"
 
 # ── Section 6: No bearer → 401 missing_bearer_token, no rows key ──────────────
 echo "=== section 6: no bearer → 401 ==="
-RESP6="$(curl -s "${BASE}/tools/list_sessions")"
+HTTP6="$(curl -s -o /tmp/resp6.json -w '%{http_code}' "${BASE}/tools/list_sessions")"
+RESP6="$(cat /tmp/resp6.json)"
 echo "$RESP6"
+if [[ "$HTTP6" != "401" ]]; then
+  fail "section 6: expected HTTP 401, got $HTTP6"
+fi
 ERR6="$(echo "$RESP6" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('error',''))")"
 if [[ "$ERR6" != "missing_bearer_token" ]]; then
   fail "section 6: expected error=missing_bearer_token, got $ERR6"
@@ -195,8 +203,12 @@ echo "ok [no_bearer_401]"
 
 # ── Section 7: Unknown bearer → 401 invalid_or_expired_token ─────────────────
 echo "=== section 7: unknown bearer → 401 ==="
-RESP7="$(curl -s -H "Authorization: Bearer not-a-real-token-xyz" "${BASE}/tools/list_sessions")"
+HTTP7="$(curl -s -o /tmp/resp7.json -w '%{http_code}' -H "Authorization: Bearer not-a-real-token-xyz" "${BASE}/tools/list_sessions")"
+RESP7="$(cat /tmp/resp7.json)"
 echo "$RESP7"
+if [[ "$HTTP7" != "401" ]]; then
+  fail "section 7: expected HTTP 401, got $HTTP7"
+fi
 ERR7="$(echo "$RESP7" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('error',''))")"
 if [[ "$ERR7" != "invalid_or_expired_token" ]]; then
   fail "section 7: expected error=invalid_or_expired_token, got $ERR7"
@@ -205,8 +217,12 @@ echo "ok [unknown_bearer_401]"
 
 # ── Section 8: Expired token → 401 ───────────────────────────────────────────
 echo "=== section 8: expired token → 401 ==="
-RESP8="$(curl -s -H "Authorization: Bearer ${EXPIRED_TOKEN}" "${BASE}/tools/list_sessions")"
+HTTP8="$(curl -s -o /tmp/resp8.json -w '%{http_code}' -H "Authorization: Bearer ${EXPIRED_TOKEN}" "${BASE}/tools/list_sessions")"
+RESP8="$(cat /tmp/resp8.json)"
 echo "$RESP8"
+if [[ "$HTTP8" != "401" ]]; then
+  fail "section 8: expected HTTP 401 for expired token, got $HTTP8"
+fi
 ERR8="$(echo "$RESP8" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('error',''))")"
 if [[ "$ERR8" != "invalid_or_expired_token" ]]; then
   fail "section 8: expected error=invalid_or_expired_token for expired token, got $ERR8"
@@ -215,8 +231,12 @@ echo "ok [expired_token_401]"
 
 # ── Section 9: siteIds=3 → 403 site_scope, no rows ───────────────────────────
 echo "=== section 9: out-of-scope site → 403 site_scope ==="
-RESP9="$(curl -s -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/list_sessions?siteIds=3")"
+HTTP9="$(curl -s -o /tmp/resp9.json -w '%{http_code}' -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/list_sessions?siteIds=3")"
+RESP9="$(cat /tmp/resp9.json)"
 echo "$RESP9"
+if [[ "$HTTP9" != "403" ]]; then
+  fail "section 9: expected HTTP 403, got $HTTP9"
+fi
 CODE9="$(echo "$RESP9" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('code',''))")"
 if [[ "$CODE9" != "site_scope" ]]; then
   fail "section 9: expected code=site_scope, got $CODE9"
@@ -230,8 +250,12 @@ echo "ok [out_of_scope_site_403]"
 
 # ── Section 10: /tools/get_film → 403 tool_not_allowed ───────────────────────
 echo "=== section 10: get_film → 403 tool_not_allowed ==="
-RESP10="$(curl -s -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/get_film")"
+HTTP10="$(curl -s -o /tmp/resp10.json -w '%{http_code}' -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/get_film")"
+RESP10="$(cat /tmp/resp10.json)"
 echo "$RESP10"
+if [[ "$HTTP10" != "403" ]]; then
+  fail "section 10: expected HTTP 403, got $HTTP10"
+fi
 CODE10="$(echo "$RESP10" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('code',''))")"
 if [[ "$CODE10" != "tool_not_allowed" ]]; then
   fail "section 10: expected code=tool_not_allowed, got $CODE10"
@@ -241,12 +265,16 @@ echo "ok [get_film_tool_not_allowed]"
 # ── Section 11: All three tools return 200; aggregates measure >= MIN_GROUP_SIZE
 echo "=== section 11: all three tools return 200 ==="
 for TOOL in get_site_performance get_film_attendance list_sessions; do
-  RESP="$(curl -s -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/${TOOL}")"
+  HTTP11="$(curl -s -o /tmp/resp11_${TOOL}.json -w '%{http_code}' -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools/${TOOL}")"
+  RESP="$(cat /tmp/resp11_${TOOL}.json)"
+  if [[ "$HTTP11" != "200" ]]; then
+    fail "section 11: tool $TOOL expected HTTP 200, got $HTTP11"
+  fi
   REFUSED_VAL="$(echo "$RESP" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('refused', 'MISSING'))")"
   if [[ "$REFUSED_VAL" != "False" ]]; then
     fail "section 11: tool $TOOL refused=$REFUSED_VAL, expected False"
   fi
-  echo "ok — $TOOL refused=False"
+  echo "ok — $TOOL HTTP 200 refused=False"
 done
 
 # Aggregate MIN_GROUP_SIZE check: seats_sold and admits >= 5
@@ -305,19 +333,28 @@ if grep -E "$PII_FIELDS" "${ROOT}/src/agent/demo_data.py" "${ROOT}/src/agent/dem
 fi
 echo "ok [pii_absent]"
 
-# ── Section 13: GET /tools manifest with/without bearer ──────────────────────
+# ── Section 13: GET /tools manifest requires bearer ──────────────────────────
 echo "=== section 13: GET /tools manifest ==="
-# Without bearer
-MAN_NOAUTH="$(curl -s "${BASE}/tools")"
-echo "$MAN_NOAUTH"
-TOOLS_COUNT="$(echo "$MAN_NOAUTH" | "$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('tools',[])))")"
-if [[ "$TOOLS_COUNT" != "3" ]]; then
-  fail "section 13: expected 3 tools in unauthenticated manifest, got $TOOLS_COUNT"
+# Without bearer → 401 missing_bearer_token
+HTTP13_NOAUTH="$(curl -s -o /tmp/resp13_noauth.json -w '%{http_code}' "${BASE}/tools")"
+RESP13_NOAUTH="$(cat /tmp/resp13_noauth.json)"
+echo "$RESP13_NOAUTH"
+if [[ "$HTTP13_NOAUTH" != "401" ]]; then
+  fail "section 13: expected HTTP 401 without bearer, got $HTTP13_NOAUTH"
 fi
+ERR13="$(echo "$RESP13_NOAUTH" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('error',''))")"
+if [[ "$ERR13" != "missing_bearer_token" ]]; then
+  fail "section 13: expected error=missing_bearer_token without bearer, got $ERR13"
+fi
+echo "ok — no bearer → HTTP 401 missing_bearer_token"
 
-# With bearer
-MAN_AUTH="$(curl -s -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools")"
+# With bearer → 200 scoped manifest
+HTTP13_AUTH="$(curl -s -o /tmp/resp13_auth.json -w '%{http_code}' -H "Authorization: Bearer ${DEMO_TOKEN}" "${BASE}/tools")"
+MAN_AUTH="$(cat /tmp/resp13_auth.json)"
 echo "$MAN_AUTH"
+if [[ "$HTTP13_AUTH" != "200" ]]; then
+  fail "section 13: expected HTTP 200 with bearer, got $HTTP13_AUTH"
+fi
 TOOLS_AUTH_COUNT="$(echo "$MAN_AUTH" | "$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('tools',[])))")"
 if [[ "$TOOLS_AUTH_COUNT" != "3" ]]; then
   fail "section 13: expected 3 tools in authenticated manifest, got $TOOLS_AUTH_COUNT"
@@ -326,7 +363,7 @@ LABEL="$(echo "$MAN_AUTH" | "$PYTHON" -c "import sys,json; print(json.load(sys.s
 if [[ -z "$LABEL" ]]; then
   fail "section 13: authenticated manifest missing token_label"
 fi
-echo "ok [tools_manifest_with_and_without_bearer]"
+echo "ok [tools_manifest_bearer_required]"
 
 # ── Section 14: Optional PUBLIC_BASE_URL re-check ────────────────────────────
 if [[ -n "${PUBLIC_BASE_URL:-}" ]]; then
@@ -347,5 +384,5 @@ else
 fi
 
 echo
-echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image"
+echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image (14 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
 exit 0
