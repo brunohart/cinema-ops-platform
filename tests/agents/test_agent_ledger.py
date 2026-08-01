@@ -24,6 +24,7 @@ from scripts.agent_ledger import (
     append_entry,
     check_session,
     digest,
+    ledger_path,
     lesson_records,
     load_entries,
     main,
@@ -63,23 +64,55 @@ def _entries(root: Path) -> list[dict[str, Any]]:
     return entries
 
 
-@pytest.fixture()
-def project(tmp_path: Path) -> Path:
-    """A throwaway project with the pipeline's files and a dirty git tree."""
+GIT_ID = ["-c", "user.email=t@t", "-c", "user.name=t"]
+
+
+def _scaffold(root: Path) -> Path:
+    """The pipeline's files in a git repository, as a run would find them."""
     for relpath in (HOOK, "scripts/agent_ledger.py"):
-        target = tmp_path / relpath
+        target = root / relpath
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((REPO_ROOT / relpath).read_bytes())
     for name in SUBAGENT_PHASES:
-        target = tmp_path / ".cursor/agents" / f"{name}.md"
+        target = root / ".cursor/agents" / f"{name}.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes((REPO_ROOT / ".cursor/agents" / f"{name}.md").read_bytes())
-    (tmp_path / "docs/agent-ledger").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "docs/agent-ledger/ledger.jsonl").touch()
+    (root / "docs/agent-ledger").mkdir(parents=True, exist_ok=True)
+    (root / "docs/agent-ledger/ledger.jsonl").touch()
     # As in the real repository: run state is scratch, and must not make the tree look changed.
-    (tmp_path / ".gitignore").write_text(".cursor/.runs/\n", encoding="utf-8")
-    # An untracked file is enough for the stop hook to see that the run changed the repository.
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (root / ".gitignore").write_text(".cursor/.runs/\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    return root
+
+
+def _commit(root: Path, message: str, *extra: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", *GIT_ID, "commit", "-q", *extra, "-m", message], cwd=root, check=True)
+
+
+def _clean(root: Path) -> bool:
+    return not subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=True
+    ).stdout
+
+
+@pytest.fixture(autouse=True)
+def never_the_real_ledger(tmp_path: Path, monkeypatch: Any) -> None:
+    """No test may write to the repository's own ledger.
+
+    `agent_ledger` resolves its root from CURSOR_PROJECT_DIR and falls back to the repo it lives
+    in, so one in-process CLI call without this fixture appends test data to the real ledger — which
+    it did, once, before this existed.
+    """
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    assert str(ledger_path()).startswith(str(tmp_path))
+
+
+@pytest.fixture()
+def project(tmp_path: Path) -> Path:
+    """History behind it, as any real repository has, and one uncommitted change in front."""
+    _scaffold(tmp_path)
+    _commit(tmp_path, "history from earlier runs")
     (tmp_path / "changed.py").write_text("x = 1\n", encoding="utf-8")
     return tmp_path
 
@@ -217,8 +250,7 @@ def test_one_session_does_not_satisfy_another(tmp_path: Path) -> None:
     assert check_session(_entries(tmp_path), "s2") == list(REQUIRED_PHASES)
 
 
-def test_cli_refuses_a_phase_entry_with_no_lesson(tmp_path: Path, monkeypatch: Any) -> None:
-    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+def test_cli_refuses_a_phase_entry_with_no_lesson(tmp_path: Path) -> None:
     args = ["append", "--phase", "plan", "--model", "claude-opus-5", "--summary", "no lesson"]
 
     assert main([*args, "--session", "s1"]) == 2
@@ -485,8 +517,73 @@ def test_a_run_that_changed_the_repo_cannot_finish_unrecorded(project: Path) -> 
 
     for phase in REQUIRED_PHASES:
         _append(project, phase, "s1")
-    _append(project, "note", "s1", summary="implement and verify not delegated: driven by hand")
+    for phase in ("implement", "verify"):
+        _append(project, "note", "s1", about=phase, summary=f"{phase} driven by hand in a test")
     assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
+
+
+def test_recording_an_exemption_does_not_disqualify_the_run_from_it(project: Path) -> None:
+    """The honest path, end to end: the ledger is the record of a run, not work the run did."""
+    _commit(project, "the run starts from a clean tree")
+    _hook(project, "post-tool", {"conversation_id": "s1", "tool_name": "Read"})
+    assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
+
+    # Now do exactly what the protocol tells a question-shaped run to do.
+    assert (
+        main(
+            [
+                "append",
+                "--phase",
+                "exempt",
+                "--model",
+                "claude-opus-5",
+                "--session",
+                "s1",
+                "--summary",
+                "answered a question about the ledger; touched no file",
+                "--allow-no-lesson",
+            ]
+        )
+        == 0
+    )
+    assert not _clean(project)  # the ledger is dirty now, because the protocol was obeyed
+    assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
+
+    # Committing the entry, as the audit trail asks, must not turn it into work either.
+    _commit(project, "ledger: exempt")
+    assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
+
+
+def test_history_rewriting_does_not_finish_a_run_silently(project: Path) -> None:
+    """A moved tip on the branch you started on is authorship whichever direction it moved."""
+    (project / "work.py").write_text("z = 3\n", encoding="utf-8")
+    _commit(project, "earlier work")
+
+    _hook(project, "post-tool", {"conversation_id": "s1", "tool_name": "Read"})
+    (project / "work.py").write_text("z = 4\n", encoding="utf-8")
+    _commit(project, "amended work", "--amend")
+
+    amended = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
+    assert "has not recorded" in amended["followup_message"]
+
+    _hook(project, "post-tool", {"conversation_id": "s2", "tool_name": "Read"})
+    subprocess.run(["git", "reset", "-q", "--hard", "HEAD~1"], cwd=project, check=True)
+    assert _clean(project)
+    reset = _hook(project, "stop", {"conversation_id": "s2", "status": "completed"})
+    assert "has not recorded" in reset["followup_message"]
+
+
+def test_a_baseline_is_never_the_string_head(tmp_path: Path) -> None:
+    """In a repo with no commits `git rev-parse HEAD` prints "HEAD" and exits 128.
+
+    Stored as a baseline, that string re-resolves to whatever HEAD is now, so every later ancestry
+    question answers itself — which is how two tests here passed while testing nothing.
+    """
+    fresh = _scaffold(tmp_path)
+    _hook(fresh, "post-tool", {"conversation_id": "s1", "tool_name": "Read"})
+    state = json.loads((fresh / ".cursor/.runs/s1.json").read_text(encoding="utf-8"))
+
+    assert state["baseline"] == {"head": "", "branch": ""}
 
 
 def test_an_exempt_entry_cannot_close_a_run_that_changed_the_repo(project: Path) -> None:
@@ -505,13 +602,47 @@ def test_a_recorded_phase_with_no_subagent_behind_it_is_challenged(project: Path
     challenged = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
     assert "a claim, not an event" in challenged["followup_message"]
 
-    # A note about a different phase does not excuse it.
-    _append(project, "note", "s1", summary="the plan phase was done in place, on Opus")
+    # Prose does not excuse a phase — "refactored the implementation" is not an explanation.
+    _append(project, "note", "s1", summary="refactored the implementation; verifying by hand")
     still = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
     assert "a claim, not an event" in still["followup_message"]
 
-    _append(project, "note", "s1", summary="implement and verify ran here: no Sonnet slug")
+    # A note about one phase excuses that phase only.
+    _append(project, "note", "s1", about="implement", summary="no Sonnet slug in this environment")
+    partly = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
+    assert "`verify`" in partly["followup_message"]
+    assert "`implement`" not in partly["followup_message"]
+
+    _append(project, "note", "s1", about="verify", summary="ran as a general subagent on Opus")
     assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
+
+
+def test_a_subagent_name_the_hook_does_not_recognise_is_reported_not_ignored(project: Path) -> None:
+    """If Cursor's name for a custom subagent differs from its filename, say so where it matters."""
+    _hook(
+        project,
+        "subagent-start",
+        {"parent_conversation_id": "s1", "subagent_type": "generalPurpose", "subagent_model": "x"},
+    )
+    for phase in REQUIRED_PHASES:
+        _append(project, phase, "s1")
+
+    message = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})[
+        "followup_message"
+    ]
+    assert "'generalPurpose'" in message
+    assert "disagree" in message
+
+
+def test_an_exempt_entry_is_not_a_stand_in_for_a_phase_that_ran(project: Path) -> None:
+    _append(project, "exempt", "s1", summary="not a substitute for the plan phase")
+
+    asked = _hook(
+        project,
+        "subagent-stop",
+        {"parent_conversation_id": "s1", "subagent_type": "planner", "status": "completed"},
+    )
+    assert "--phase plan" in asked["followup_message"]
 
 
 def test_a_phase_a_subagent_actually_ran_needs_no_explanation(project: Path) -> None:
@@ -533,15 +664,12 @@ def test_a_phase_a_subagent_actually_ran_needs_no_explanation(project: Path) -> 
 
 def test_landing_on_another_branch_is_movement_not_authorship(project: Path) -> None:
     """A moved HEAD only counts when the baseline commit is an ancestor of where we ended up."""
-    commit = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm"]
-    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
-    subprocess.run([*commit, "baseline"], cwd=project, check=True)
+    _commit(project, "the branch the run will leave")
     subprocess.run(["git", "checkout", "-q", "-b", "elsewhere"], cwd=project, check=True)
     (project / "other.py").write_text("y = 2\n", encoding="utf-8")
-    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
-    subprocess.run([*commit, "work by someone else"], cwd=project, check=True)
+    _commit(project, "work by an earlier run on another branch")
 
-    # Baseline is taken here, on `elsewhere`, then the run lands back on the original branch.
+    # Baseline is taken here, on `elsewhere`, then the run lands back on the original commit.
     _hook(project, "post-tool", {"conversation_id": "s1", "tool_name": "Read"})
     original = subprocess.run(
         ["git", "rev-list", "--max-parents=0", "HEAD"],
@@ -552,14 +680,13 @@ def test_landing_on_another_branch_is_movement_not_authorship(project: Path) -> 
     ).stdout.strip()
     subprocess.run(["git", "checkout", "-q", original], cwd=project, check=True)
 
+    assert _clean(project)
     assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
 
 
 def test_a_run_with_no_baseline_is_not_nagged_for_the_branch_history(project: Path) -> None:
     """Without a baseline the answer is no: authoring needs a tool call, and that takes one."""
-    commit = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "earlier run"]
-    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
-    subprocess.run(commit, cwd=project, check=True)
+    _commit(project, "work an earlier run left on this branch")
     assert not (project / ".cursor/.runs").exists()
 
     assert _hook(project, "stop", {"conversation_id": "fresh", "status": "completed"}) == {}
@@ -576,16 +703,9 @@ def test_a_broken_state_file_does_not_stop_the_pipeline_dead(project: Path) -> N
 def test_a_run_that_committed_and_pushed_its_work_still_owes_its_entries(project: Path) -> None:
     """The hole this closes: a clean tree with nothing ahead of upstream is how a cloud run ends."""
     _hook(project, "pre-tool", {"conversation_id": "s1", "tool_name": "Read"})  # takes the baseline
-    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
-    subprocess.run(
-        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "the work"],
-        cwd=project,
-        check=True,
-    )
+    _commit(project, "the work")
 
-    assert subprocess.run(
-        ["git", "status", "--porcelain"], cwd=project, capture_output=True, text=True, check=True
-    ).stdout == ""
+    assert _clean(project)  # and, being pushed, nothing would be ahead of upstream either
     response = _hook(project, "stop", {"conversation_id": "s1", "status": "completed"})
     assert "has not recorded" in response["followup_message"]
 
@@ -593,20 +713,18 @@ def test_a_run_that_committed_and_pushed_its_work_still_owes_its_entries(project
 def test_the_baseline_is_recorded_at_the_first_hook_of_the_run(project: Path) -> None:
     _hook(project, "pre-tool", {"conversation_id": "s1", "tool_name": "Read"})
     state = json.loads((project / ".cursor/.runs/s1.json").read_text(encoding="utf-8"))
+    baseline = state["baseline"]
 
-    assert state["baseline"]["branch"]
-    assert "head" in state["baseline"]
+    assert len(baseline["head"]) == 40  # a real commit id, not git's error output
+    assert baseline["branch"]
 
 
 def test_a_run_that_changed_nothing_is_not_nagged(project: Path) -> None:
-    """A question is not an issue: with a clean tree and no new commits, the hook stays quiet."""
-    commit = ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "baseline"]
-    subprocess.run(["git", "add", "-A"], cwd=project, check=True)
-    subprocess.run(commit, cwd=project, check=True)
+    """A question is not an issue: a baseline was taken, HEAD has not moved, the tree is clean."""
+    _commit(project, "the tree the run found")
+    _hook(project, "post-tool", {"conversation_id": "s1", "tool_name": "Read"})
 
-    assert subprocess.run(
-        ["git", "status", "--porcelain"], cwd=project, capture_output=True, text=True, check=True
-    ).stdout == ""
+    assert _clean(project)
     assert _hook(project, "stop", {"conversation_id": "s1", "status": "completed"}) == {}
 
 

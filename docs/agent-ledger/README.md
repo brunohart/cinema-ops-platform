@@ -71,7 +71,8 @@ Named here because a limit a reviewer finds is worth less than one it is told:
 | field | meaning |
 |---|---|
 | `session` | the conversation id of the run — what `check` groups by, and what the hash chains follow |
-| `phase` | `plan` · `implement` · `verify` · `exempt` (the run needed no pipeline) · `note` (written by a hook, not a model) |
+| `phase` | `plan` · `implement` · `verify` · `exempt` (the run changed nothing) · `note` (a deviation, or an observation a hook recorded) |
+| `about` | on a `note`, the phase it explains — `--about implement` is what excuses a phase that could not be delegated. A field rather than a sentence, so "refactored the implementation" cannot excuse anything by accident |
 | `model` | the model that **actually** ran the phase. `subagentStart` records what really executed, so a pinned id that silently did not take effect lands here as a `note` rather than as a false `claude-sonnet-5` |
 | `verdict` | the verifier's `pass`/`fail`, or `blocked` when a phase could not complete |
 | `lessons[]` | the recursion: what the next run should know, tagged by area, with the evidence that earned it |

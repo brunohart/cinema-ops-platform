@@ -91,18 +91,25 @@ def append_command(phase: str, session: str) -> str:
 
 
 def phase_recorded(session: str, phase: str) -> bool:
+    """Only that phase's own entry counts. `exempt` is not a stand-in for a phase that ran."""
     entries, _ = ledger.load_entries(ledger.ledger_path(ROOT))
-    return bool({phase, "exempt"} & ledger.recorded_phases(entries, session))
+    return phase in ledger.recorded_phases(entries, session)
 
 
 def git(*args: str) -> str:
+    """stdout of a successful git command, or empty.
+
+    The exit code is not optional: `git rev-parse HEAD` in a repo with no commits prints the literal
+    string "HEAD" and exits 128, and storing that as a baseline commit makes every later ancestry
+    question answer itself.
+    """
     try:
         out = subprocess.run(
             ["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=10, check=False
         )
     except (OSError, subprocess.SubprocessError):
         return ""
-    return out.stdout.strip()
+    return out.stdout.strip() if out.returncode == 0 else ""
 
 
 def record_baseline(state: dict[str, Any]) -> None:
@@ -126,19 +133,33 @@ def git_ok(*args: str) -> bool:
         return False
 
 
+def _work_outside_the_ledger(*args: str) -> bool:
+    """Run a git query with the ledger excluded, via pathspec rather than by parsing paths.
+
+    The ledger is the record of a run, not the work being recorded. Counting it as work makes the
+    exemption unreachable: a run that changed nothing, then writes the `exempt` entry the protocol
+    asks for, has now dirtied a tracked file — and would be refused the exemption it just wrote. A
+    gate that punishes the compliant path is worse than the hole it closed.
+    """
+    return bool(git(*args, "--", ".", f":(exclude){ledger.LEDGER_RELPATH}"))
+
+
 def run_changed_the_repo(state: dict[str, Any]) -> bool:
     """Did *this run* change the repository? A run that changed nothing was a question.
 
-    Compared against a baseline the run recorded at its own first hook, never against upstream or
-    origin/main: those describe what earlier runs left on the branch, so they let a run that commits
-    and pushes finish silently while nagging a run that touched nothing.
+    Measured against a baseline the run recorded at its own first hook, never against upstream or
+    origin/main: those describe what earlier runs left on the branch, so they would let a run that
+    commits and pushes finish silently while nagging a run that touched nothing.
 
-    A moved HEAD only counts as authorship when the baseline commit is an ancestor of it — commits
-    were added on top of where we started. Landing somewhere else entirely (`git checkout main`) is
-    movement, not work. With no baseline at all, the answer is no: authoring requires a tool call,
-    a tool call takes the baseline before it runs, and uncommitted work is caught above regardless.
+    On the branch the run started on, any movement of the tip counts — a commit, an amend, a reset,
+    a rebase. "Did HEAD move forward" is not the same question as "did this run author anything",
+    and the three history-rewriting answers to it are all ways real work would have escaped. Across
+    a branch change, the baseline must be an ancestor: landing somewhere else is movement, not work.
+
+    With no baseline, the answer is no: authoring requires a tool call, a tool call takes the
+    baseline before it runs, and uncommitted work is caught above regardless.
     """
-    if git("status", "--porcelain"):
+    if _work_outside_the_ledger("status", "--porcelain"):
         return True
 
     baseline = state.get("baseline")
@@ -148,7 +169,15 @@ def run_changed_the_repo(state: dict[str, Any]) -> bool:
     head = git("rev-parse", "HEAD")
     if not head or head == baseline["head"]:
         return False
-    return git_ok("merge-base", "--is-ancestor", str(baseline["head"]), head)
+
+    same_branch = bool(baseline.get("branch")) and baseline["branch"] == git(
+        "rev-parse", "--abbrev-ref", "HEAD"
+    )
+    if not same_branch and not git_ok(
+        "merge-base", "--is-ancestor", str(baseline["head"]), head
+    ):
+        return False
+    return _work_outside_the_ledger("diff", "--name-only", f"{baseline['head']}..{head}")
 
 
 def protocol_brief(session: str) -> str:
@@ -254,6 +283,17 @@ def handle_subagent_start(data: dict[str, Any]) -> None:
     phase = ledger.SUBAGENT_PHASES.get(subagent)
     response: dict[str, Any] = {}
 
+    if not phase and subagent:
+        # Cursor's name for a custom subagent is assumed to be the filename in `.cursor/agents/`.
+        # If it is not, phase detection goes quiet — so record what we did see, and let the stop
+        # hook say it out loud rather than leaving the disagreement invisible.
+        state = read_state(session)
+        record_baseline(state)
+        unknown = state.setdefault("unknown_subagents", [])
+        if isinstance(unknown, list) and subagent not in unknown:
+            unknown.append(subagent)
+        write_state(session, state)
+
     if phase:
         state = read_state(session)
         record_baseline(state)
@@ -340,16 +380,17 @@ def unattested_phases(
 ) -> list[str]:
     """Phases recorded in the ledger that no subagent of that phase ever started.
 
-    The ledger records claims; `subagentStart` records events. Where they disagree the run has
-    to say why, in a `note` naming the phase — a note about something else does not excuse it.
+    The ledger records claims; `subagentStart` records events. Where they disagree the run has to
+    say why, in a `note --about <phase>`. The excuse is a field, not a word in prose: matching on
+    the summary meant "refactored the implementation" excused the implement phase by accident.
     `plan` is not checked: the protocol lets a parent already on Opus plan in place.
     """
     started = state.get("phases") if isinstance(state.get("phases"), dict) else {}
-    excused = " ".join(
-        str(e.get("summary", "")).lower()
+    excused = {
+        str(e.get("about"))
         for e in entries
-        if e.get("session") == session and e.get("phase") == "note"
-    )
+        if e.get("session") == session and e.get("phase") == "note" and e.get("about")
+    }
     return [
         phase
         for phase in ("implement", "verify")
@@ -403,15 +444,21 @@ def handle_stop(data: dict[str, Any]) -> None:
             f"properly (`{'`, `'.join(ledger.PHASE_SUBAGENTS[p] for p in unattested)}`), or record "
             "why it could not be delegated:"
         )
-        lines.append(
-            f"  python3 scripts/agent_ledger.py append --phase note "
-            f"--model <the model that ran it> --session {session} "
-            f'--summary "<name the phase, and why it was not delegated>" '
-            f'--lesson "<what would let the next run delegate it>"'
-        )
-        lines.append(
-            "The note has to name the phase: a note about something else does not excuse it."
-        )
+        for phase in unattested:
+            lines.append(
+                f"  python3 scripts/agent_ledger.py append --phase note --about {phase} "
+                f"--model <the model that ran it> --session {session} "
+                f'--summary "<why the {phase} phase was not delegated>" '
+                f'--lesson "<what would let the next run delegate it>"'
+            )
+        seen = read_state(session).get("unknown_subagents") or []
+        if seen:
+            lines.append(
+                "This run did launch subagents this hook did not recognise — "
+                f"{', '.join(repr(str(s)) for s in seen)}. If one of those was the phase's "
+                "subagent, then `.cursor/agents/` and the name Cursor reports disagree, and that "
+                "is worth a `note` of its own."
+            )
     emit({"followup_message": "\n".join(lines)})
 
 

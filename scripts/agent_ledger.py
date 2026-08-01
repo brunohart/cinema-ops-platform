@@ -153,6 +153,7 @@ def append_entry(
     issue: str | None = None,
     branch: str | None = None,
     verdict: str | None = None,
+    about: str | None = None,
     lessons: list[dict[str, Any]] | None = None,
     artefacts: list[str] | None = None,
     source: str = "agent",
@@ -167,6 +168,8 @@ def append_entry(
     """
     if phase not in ALL_PHASES:
         raise ValueError(f"unknown phase {phase!r}; expected one of {', '.join(ALL_PHASES)}")
+    if about is not None and about not in REQUIRED_PHASES:
+        raise ValueError(f"unknown phase {about!r} in --about; expected one of {REQUIRED_PHASES}")
 
     path = ledger_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +195,8 @@ def append_entry(
                 entry["branch"] = one_line(branch, 200)
             if verdict:
                 entry["verdict"] = verdict
+            if about:
+                entry["about"] = about
             cleaned = clean_lessons(lessons)
             if cleaned:
                 entry["lessons"] = cleaned
@@ -261,9 +266,11 @@ def validate_entries(entries: list[dict[str, Any]]) -> list[str]:
         expected_prev = chain.get(session, "")
         actual_prev = str(entry.get("prev", ""))
         if actual_prev != expected_prev:
+            # `!r`, like every other interpolation here: these strings are put in front of an agent
+            # by the stop hook, and this branch fires exactly when the file has been tampered with.
             problems.append(
-                f"{where}: broken chain for session {session} — prev is "
-                f"{actual_prev[:12] or '(empty)'}, expected {expected_prev[:12] or '(empty)'}"
+                f"{where}: broken chain for session {session!r} — prev is "
+                f"{actual_prev[:12]!r}, expected {expected_prev[:12]!r}"
             )
         body = {k: v for k, v in entry.items() if not k.startswith("_") and k != "hash"}
         body.pop("prev", None)
@@ -442,8 +449,11 @@ def _git(root: Path, *args: str) -> str | None:
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    value = out.stdout.strip()
-    return value or None
+    if out.returncode != 0:
+        # git writes usable-looking rubbish to stdout on failure: `rev-parse HEAD` in a repo with no
+        # commits prints "HEAD" and exits 128. Ignoring the exit code stores that as a commit id.
+        return None
+    return out.stdout.strip() or None
 
 
 def cmd_append(args: argparse.Namespace) -> int:
@@ -476,6 +486,7 @@ def cmd_append(args: argparse.Namespace) -> int:
         issue=issue,
         branch=branch,
         verdict=args.verdict,
+        about=args.about,
         lessons=lessons,
         artefacts=args.artefact or None,
         source=args.source,
@@ -564,6 +575,11 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--issue", help="e.g. VDE-38 (inferred from the branch when omitted)")
     append.add_argument("--branch", help="defaults to the current git branch")
     append.add_argument("--verdict", choices=["pass", "fail", "blocked", "n/a"])
+    append.add_argument(
+        "--about",
+        choices=REQUIRED_PHASES,
+        help="for `--phase note`: which phase this note explains, e.g. one that was not delegated",
+    )
     append.add_argument(
         "--lesson", action="append", help="what the next run should know (repeatable)"
     )

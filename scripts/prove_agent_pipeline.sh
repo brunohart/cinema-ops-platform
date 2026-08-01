@@ -127,7 +127,12 @@ cp .cursor/hooks/pipeline_hook.py "$PROJECT/.cursor/hooks/"
 cp scripts/agent_ledger.py "$PROJECT/scripts/"
 cp .cursor/agents/planner.md .cursor/agents/implementer.md .cursor/agents/verifier.md "$PROJECT/.cursor/agents/"
 : >"$PROJECT/docs/agent-ledger/ledger.jsonl"
+printf '.cursor/.runs/\n' >"$PROJECT/.gitignore"
 git -C "$PROJECT" init -q
+# History behind it, as any real repository has: without a commit there is no baseline to move from,
+# and every check below would pass while testing nothing.
+git -C "$PROJECT" add -A
+git -C "$PROJECT" -c user.email=proof@local -c user.name=proof commit -qm "history from earlier runs"
 echo "x = 1" >"$PROJECT/changed.py"   # this run changed the repository
 
 hook() { (cd "$PROJECT" && CURSOR_PROJECT_DIR="$PROJECT" "$PYTHON" .cursor/hooks/pipeline_hook.py "$1"); }
@@ -169,6 +174,11 @@ grep -q "has not recorded" "$WORK/stop-committed.json" \
   || fail "a run that committed its work escaped the ledger requirement"
 pass "committing the work does not escape it — HEAD is compared against the run's own baseline"
 
+baseline_head="$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['baseline']['head'])" \
+  "$PROJECT/.cursor/.runs/proof.json")"
+[[ "${#baseline_head}" -eq 40 ]] || fail "the baseline is not a commit id (got '$baseline_head')"
+pass "the baseline is a real commit id, so the checks above are not comparing HEAD with itself"
+
 "$PYTHON" scripts/agent_ledger.py append --phase exempt --model claude-opus-5 --session proof \
   --summary "claiming the pipeline did not apply, after changing the repository" \
   --allow-no-lesson >/dev/null
@@ -186,9 +196,11 @@ grep -q "a claim, not an event" "$WORK/stop-claimed.json" \
   || fail "phases were recorded that no subagent ever ran, and nothing objected"
 pass "a phase recorded with no subagent behind it is challenged as a claim"
 
-"$PYTHON" scripts/agent_ledger.py append --phase note --model claude-opus-5 --session proof \
-  --summary "implement and verify were not delegated during the proof run" \
-  --lesson "the proof drives the hooks directly, so no subagent exists to attest a phase" >/dev/null
+for phase in implement verify; do
+  "$PYTHON" scripts/agent_ledger.py append --phase note --about "$phase" --model claude-opus-5 \
+    --session proof --summary "the $phase phase was not delegated during the proof run" \
+    --lesson "the proof drives the hooks directly, so no subagent exists to attest a phase" >/dev/null
+done
 echo '{"conversation_id":"proof","status":"completed"}' | hook stop >"$WORK/stop2.json"
 [[ "$(tr -d '[:space:]' <"$WORK/stop2.json")" == "{}" ]] || fail "the stop hook still objects after all three phases and the note were recorded"
 pass "the same run finishes cleanly once the phases are recorded and the deviation is noted"

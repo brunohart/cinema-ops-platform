@@ -78,10 +78,17 @@ python3 scripts/agent_ledger.py promote                 # lessons that have earn
 - **`stop`** — a run that changed the repository cannot finish while any of the three entries is
   missing, while the ledger fails validation, or while it records a phase that no subagent of that
   phase ever started. That last one is the gap between a claim and an event: if a phase could not be
-  delegated, append a `note` entry saying which and why, and the run may finish.
+  delegated, say so with `--phase note --about <phase>` and the run may finish. The excuse is a
+  field, not a sentence — prose about "the implementation" used to excuse the implement phase by
+  accident.
 
-"Changed the repository" is measured against a baseline this run recorded at its own first hook —
-not against `origin/main` or upstream, which describe what earlier runs left on the branch.
+"Changed the repository" is measured against a baseline this run recorded at its own first hook — not
+against `origin/main` or upstream, which describe what earlier runs left on the branch. It means an
+uncommitted change, or the tip of the branch the run started on having moved: a commit, an amend, a
+reset, a rebase. A `git pull` that fast-forwards counts too, which is a false positive we accept —
+the failure direction here is one extra question, not a run that escapes. Changes to the ledger
+itself never count: recording the work is not the work, and a gate that punishes the run for
+obeying the protocol would be worse than the hole it closed.
 
 Hooks fail open: a bug there degrades this to a convention rather than wedging the session. That is
 why the protocol is written here too. `CINEMA_PIPELINE_OFF=1` in the environment silences all five
