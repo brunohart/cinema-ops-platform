@@ -4,9 +4,13 @@
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f sql/init/009_kill_test_least_privilege.sql
 
 -- Setup: a probe table in bronze for extractor/transformer tests.
+-- Drop first so the test is idempotent on a DB that had a failed previous run.
 -- gold.dim_film and gold.dim_customer already exist from:
 --   sql/gold/003_agent_redteam_fixture.sql and sql/gold/003_dim_customer.sql
-CREATE TABLE IF NOT EXISTS bronze._vde52_probe (
+DROP TABLE IF EXISTS bronze._vde52_probe;
+DROP TABLE IF EXISTS gold._vde52_probe;
+
+CREATE TABLE bronze._vde52_probe (
     id   int PRIMARY KEY,
     val  text NOT NULL
 );
@@ -116,9 +120,14 @@ BEGIN
   SELECT count(*) INTO cnt FROM gold.dim_film;
   RAISE NOTICE 'api SELECT gold.dim_film count: %', cnt;
 
-  -- INSERT into gold.dim_film must fail
+  -- INSERT into gold.dim_film must fail.
+  -- film_key uses text literals ('99999') so these work whether the PK type is text
+  -- (from 002_sla_check_columns) or bigint (from 003_agent_redteam_fixture) — Postgres
+  -- coerces string literals to the target column type in both cases.
+  -- title must exist before this runs: the prove script calls
+  -- ALTER TABLE gold.dim_film ADD COLUMN IF NOT EXISTS title text in its prelude.
   BEGIN
-    INSERT INTO gold.dim_film (film_key, title) VALUES (99999, 'probe');
+    INSERT INTO gold.dim_film (film_key, title) VALUES ('99999', 'probe');
     RAISE EXCEPTION 'VDE-52 kill-test FAILED: api INSERT gold.dim_film succeeded';
   EXCEPTION WHEN insufficient_privilege THEN
     RAISE NOTICE 'api INSERT gold.dim_film correctly denied';
@@ -126,7 +135,7 @@ BEGIN
 
   -- UPDATE gold.dim_film must fail
   BEGIN
-    UPDATE gold.dim_film SET title = 'mutated' WHERE film_key = 1;
+    UPDATE gold.dim_film SET title = 'mutated' WHERE film_key = '1';
     RAISE EXCEPTION 'VDE-52 kill-test FAILED: api UPDATE gold.dim_film succeeded';
   EXCEPTION WHEN insufficient_privilege THEN
     RAISE NOTICE 'api UPDATE gold.dim_film correctly denied';
@@ -134,7 +143,7 @@ BEGIN
 
   -- DELETE gold.dim_film must fail
   BEGIN
-    DELETE FROM gold.dim_film WHERE film_key = 99999;
+    DELETE FROM gold.dim_film WHERE film_key = '99999';
     RAISE EXCEPTION 'VDE-52 kill-test FAILED: api DELETE gold.dim_film succeeded';
   EXCEPTION WHEN insufficient_privilege THEN
     RAISE NOTICE 'api DELETE gold.dim_film correctly denied';

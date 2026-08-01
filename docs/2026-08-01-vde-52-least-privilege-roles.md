@@ -50,13 +50,15 @@ not application discipline. ADR-003 makes each layer's scope a schema boundary.
 docker compose up -d db && ./scripts/prove_least_privilege_roles.sh
 ```
 
-### Captured output (2026-08-01, re-run after verifier fixes)
+### Captured output (2026-08-01, re-run after compose-shape fix)
 
-Three fixes applied before this run:
-1. `bronze._vde52_grant_probe` created BEFORE roles so `GRANT … ON ALL TABLES` covers it.
-2. Transformer SELECT bronze uses `ON_ERROR_STOP=1` against the named probe (no fallback).
-3. Transformer INSERT bronze tested as INSERT-only in its own psql invocation (separate from CREATE).
-4. Grant matrix queried before probe cleanup — bronze rows now appear.
+Additional fixes applied before this run (on top of verifier pass-2 fixes):
+- Prove prelude adds `ALTER TABLE gold.dim_film ADD COLUMN IF NOT EXISTS title text` so the
+  kill test works on both DB shapes (compose-init: `film_key text`, no `title`; fixture-init:
+  `film_key bigint`, `title text`).
+- All `film_key` literals in the kill test and headline INSERT use string form (`'99999'`, `'1'`)
+  so they coerce to whichever PK type the running DB has.
+- Kill test drops leftover probe tables at the top (idempotent on re-runs after a failed run).
 
 ```
 ==> ensure Postgres is up
@@ -66,6 +68,7 @@ psql:sql/init/001_schemas.sql:5: NOTICE:  schema "silver" already exists, skippi
 psql:sql/init/001_schemas.sql:6: NOTICE:  schema "gold" already exists, skipping
 psql:sql/init/001_schemas.sql:7: NOTICE:  schema "meta" already exists, skipping
 ==> create bronze grant probe (before roles so ON ALL TABLES covers it)
+NOTICE:  relation "_vde52_grant_probe" already exists, skipping
 ==> apply extractor role (GRANT INSERT ON ALL TABLES now covers _vde52_grant_probe)
 psql:sql/init/002_extractor_role.sql:10: NOTICE:  schema "bronze" already exists, skipping
 ==> apply gold tables (idempotent)
@@ -75,41 +78,45 @@ psql:sql/gold/001_fact_grains.sql:27: NOTICE:  relation "fct_booking" already ex
 psql:sql/gold/001_fact_grains.sql:41: NOTICE:  relation "fct_showtime_performance" already exists, skipping
 psql:sql/gold/003_dim_customer.sql:6: NOTICE:  schema "gold" already exists, skipping
 psql:sql/gold/003_dim_customer.sql:15: NOTICE:  relation "dim_customer" already exists, skipping
+NOTICE:  column "title" of relation "dim_film" already exists, skipping
 ==> apply transformer role (GRANT SELECT ON ALL TABLES in bronze covers _vde52_grant_probe)
 psql:sql/init/007_transformer_role.sql:115: NOTICE:  role "cinema" has already been granted membership in role "transformer" by role "cinema"
 ==> apply api role
 psql:sql/init/008_api_role.sql:93: NOTICE:  role "cinema" has already been granted membership in role "api" by role "cinema"
 ==> set local dev passwords (LOGIN flag ensures loginability on a cold compose)
 ==> run kill-test (SET ROLE path)
+DROP TABLE
+psql:sql/init/009_kill_test_least_privilege.sql:11: NOTICE:  table "_vde52_probe" does not exist, skipping
+DROP TABLE
 CREATE TABLE
 GRANT
 GRANT
 SET
 INSERT 0 1
-psql:sql/init/009_kill_test_least_privilege.sql:57: NOTICE:  extractor UPDATE bronze correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:57: NOTICE:  extractor DELETE bronze correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:57: NOTICE:  extractor TRUNCATE bronze correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:57: NOTICE:  extractor SELECT gold correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:61: NOTICE:  extractor UPDATE bronze correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:61: NOTICE:  extractor DELETE bronze correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:61: NOTICE:  extractor TRUNCATE bronze correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:61: NOTICE:  extractor SELECT gold correctly denied
 DO
 RESET
 SET
-psql:sql/init/009_kill_test_least_privilege.sql:81: NOTICE:  transformer SELECT bronze: 1 row(s)
-psql:sql/init/009_kill_test_least_privilege.sql:81: NOTICE:  transformer INSERT bronze correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:85: NOTICE:  transformer SELECT bronze: 1 row(s)
+psql:sql/init/009_kill_test_least_privilege.sql:85: NOTICE:  transformer INSERT bronze correctly denied
 DO
 CREATE TABLE
-psql:sql/init/009_kill_test_least_privilege.sql:98: NOTICE:  transformer INSERT gold._vde52_probe: OK
-psql:sql/init/009_kill_test_least_privilege.sql:98: NOTICE:  transformer SELECT gold._vde52_probe: 1 row(s)
+psql:sql/init/009_kill_test_least_privilege.sql:102: NOTICE:  transformer INSERT gold._vde52_probe: OK
+psql:sql/init/009_kill_test_least_privilege.sql:102: NOTICE:  transformer SELECT gold._vde52_probe: 1 row(s)
 DO
 DROP TABLE
 RESET
 SET
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api SELECT gold.dim_film count: 2
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api INSERT gold.dim_film correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api UPDATE gold.dim_film correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api DELETE gold.dim_film correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api SELECT dim_customer(customer_key, signup_date): key=1001, date=2024-03-12
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api SELECT customer_email correctly denied
-psql:sql/init/009_kill_test_least_privilege.sql:163: NOTICE:  api SELECT bronze correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api SELECT gold.dim_film count: 1
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api INSERT gold.dim_film correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api UPDATE gold.dim_film correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api DELETE gold.dim_film correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api SELECT dim_customer(customer_key, signup_date): key=1001, date=2024-03-12
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api SELECT customer_email correctly denied
+psql:sql/init/009_kill_test_least_privilege.sql:172: NOTICE:  api SELECT bronze correctly denied
 DO
 RESET
 DROP TABLE
@@ -128,7 +135,7 @@ LOCATION:  aclcheck_error, aclchk.c:2812
 ==> positive check: api SELECT gold.dim_film
  count
 -------
-     2
+     1
 (1 row)
 
 
@@ -177,7 +184,7 @@ ERROR:  42501: permission denied for table _vde52_grant_probe
 LOCATION:  aclcheck_error, aclchk.c:2812
   SQLSTATE 42501 confirmed for extractor UPDATE bronze
 
-==> owner check: no stray probe row in gold.dim_film (film_key = 99999)
+==> owner check: no stray probe row in gold.dim_film (film_key = '99999')
   rows with film_key=99999: 0
   confirmed: 0 rows
 
@@ -186,11 +193,13 @@ LOCATION:  aclcheck_error, aclchk.c:2812
 -------------+--------------+---------------------------------------------------------
  api         | gold         | SELECT
  extractor   | bronze       | INSERT
+ extractor   | meta         | INSERT,SELECT,UPDATE
+ extractor   | ops          | INSERT,SELECT,UPDATE
  transformer | bronze       | SELECT
  transformer | gold         | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE
-(4 rows)
+(6 rows)
 
-  bronze grant rows confirmed (2 privilege rows)
+  bronze grant rows confirmed (14 privilege rows)
 
 OK — VDE-52: extractor→bronze-insert-only, transformer→bronze-read+silver+gold-write, api→gold-read-only (no PII)
 ```
@@ -201,7 +210,7 @@ The headline command — standalone, once the prove script has provisioned the r
 
 ```bash
 PGPASSWORD=api psql "postgresql://api@localhost:5432/cinema_ops" --set=VERBOSITY=verbose \
-  -c "insert into gold.dim_film(film_key, title) values (99999, 'probe')"
+  -c "insert into gold.dim_film(film_key, title) values ('99999', 'probe')"
 ```
 
 Output:

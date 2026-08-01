@@ -418,7 +418,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
-| — | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
+| [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 
 That last row is the only one with no issue id, and it stays visibly empty rather than being filled
 in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so

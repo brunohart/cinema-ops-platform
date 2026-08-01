@@ -65,11 +65,19 @@ psql_cmd -f sql/gold/003_dim_customer.sql >/dev/null
 # fct_booking INSERT may fail on a fresh DB because 001_fact_grains.sql creates fct_booking
 # with a different schema — apply without ON_ERROR_STOP so dim_film creation completes.
 psql "$DB_URL" -f sql/gold/003_agent_redteam_fixture.sql >/dev/null 2>&1 || true
-# Ensure dim_film has at least one row and the title column, even if the INSERT above failed.
+
+# Ensure dim_film has the 'title' column regardless of which init script created the table.
+# On a compose-init volume, 002_sla_check_columns.sql wins the CREATE TABLE race and creates
+# dim_film with film_key TEXT (no title); 003_agent_redteam_fixture's CREATE TABLE IF NOT EXISTS
+# is then a no-op, so title never appears. The kill test must find title; add it here.
+# Also seed at least one row using string literals for film_key so the INSERT works whether
+# film_key is TEXT (compose-init shape) or BIGINT (fixture shape).
 psql_cmd -c "
   ALTER TABLE gold.dim_film ADD COLUMN IF NOT EXISTS title text;
+" >/dev/null
+psql_cmd -c "
   INSERT INTO gold.dim_film (film_key, title, is_current)
-  VALUES (1, 'The Heist', true), (2, 'Quiet Sunday', true)
+  VALUES ('1', 'The Heist', true), ('2', 'Quiet Sunday', true)
   ON CONFLICT (film_key) DO NOTHING;
 " >/dev/null 2>&1 || true
 
@@ -89,9 +97,12 @@ psql_cmd -v ON_ERROR_STOP=1 -f sql/init/009_kill_test_least_privilege.sql
 
 echo ""
 echo "==> headline proof: api INSERT gold.dim_film must fail with SQLSTATE 42501"
+# Use string literal '99999' for film_key: works whether the PK type is text (compose-init
+# shape from 002_sla_check_columns) or bigint (fixture shape). Postgres coerces string
+# literals to the target column type in DML.
 INSERT_OUT="$(PGPASSWORD=api psql "postgresql://api@127.0.0.1:5432/cinema_ops" \
   --set=VERBOSITY=verbose \
-  -c "insert into gold.dim_film(film_key, title) values (99999, 'probe')" 2>&1 || true)"
+  -c "insert into gold.dim_film(film_key, title) values ('99999', 'probe')" 2>&1 || true)"
 echo "$INSERT_OUT"
 
 if echo "$INSERT_OUT" | grep -q '42501'; then
@@ -105,7 +116,7 @@ fi
 # psql exits 0 on permission denied when not using ON_ERROR_STOP; verify non-zero exit
 if PGPASSWORD=api psql "postgresql://api@127.0.0.1:5432/cinema_ops" \
      --set=VERBOSITY=verbose \
-     -c "insert into gold.dim_film(film_key, title) values (99999, 'probe')" \
+     -c "insert into gold.dim_film(film_key, title) values ('99999', 'probe')" \
      >/dev/null 2>&1; then
   echo "FAIL: api INSERT gold.dim_film exited 0 — should have been denied" >&2
   exit 1
@@ -188,8 +199,8 @@ fi
 echo "  SQLSTATE 42501 confirmed for extractor UPDATE bronze"
 
 echo ""
-echo "==> owner check: no stray probe row in gold.dim_film (film_key = 99999)"
-COUNT="$(psql_cmd -Atc "select count(*) from gold.dim_film where film_key = 99999")"
+echo "==> owner check: no stray probe row in gold.dim_film (film_key = '99999')"
+COUNT="$(psql_cmd -Atc "select count(*) from gold.dim_film where film_key = '99999'")"
 echo "  rows with film_key=99999: $COUNT"
 if [[ "$COUNT" != "0" ]]; then
   echo "FAIL: expected 0 rows with film_key=99999, got $COUNT" >&2
