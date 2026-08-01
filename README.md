@@ -1,6 +1,6 @@
 # cinema-ops-platform
 
-A local, fully-proven data platform for cinema exhibition data — four unlike sources landed append-only, modelled into a governed gold layer, and served to an AI agent through a fixed tool set that has no column for personal data — built for a reviewer who would rather run it and argue with it than read about it.
+A local, fully-proven data platform for cinema exhibition data — four unlike sources, an append-only bronze layer, a governed gold layer, and an AI agent tool set with no personal-data field — built for a reviewer who would rather run it than read about it.
 
 ---
 
