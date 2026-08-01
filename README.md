@@ -344,6 +344,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
+| MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 
 > [!WARNING]
@@ -418,6 +419,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
+| — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
 | [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
 
@@ -441,6 +443,7 @@ into every delegation, the model that *actually* ran each phase is recorded from
 input rather than the agent's word, and a run that changed the repository cannot finish while any of
 the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
 with nothing installed but Python and git.
+
 
 ### Specified, not yet built
 
@@ -485,8 +488,12 @@ sql/
   meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
+  init/005_agent_role.sql  SELECT-only agent role; no grant on dim_customer PII
+  init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
+
+agent-api/                 allowlisted queries + Hono read path (no SQL door)
 
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors
@@ -494,6 +501,8 @@ dbt/
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
+mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
+evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
