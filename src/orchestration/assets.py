@@ -1,9 +1,7 @@
 """Dagster assets for the cinema-ops medallion graph (VDE-22 / Model 09 / VDE-33).
 
-Bronze assets wrap the four extractors. Silver and gold assets declare what
-should exist downstream — dependencies are function arguments, not an explicit
-``deps=[...]`` list, so the graph stays readable. Transforms themselves land
-with dbt later; today is the lineage.
+Bronze assets wrap the four extractors. Silver and gold are dbt models loaded
+as first-class assets via ``orchestration.dbt_assets`` (ADR-004 / VDE-29).
 
 Freshness policies attach only to SOURCE (bronze) assets — staleness originates
 at the entry points; downstream freshness is derived (VDE-33 / Model 11).
@@ -16,7 +14,6 @@ from typing import Any
 
 from dagster import (
     AssetExecutionContext,
-    AssetIn,
     AutomationCondition,
     FreshnessPolicy,
     MaterializeResult,
@@ -262,168 +259,5 @@ def raw_ticketing(
     return MaterializeResult(metadata=_result_metadata(payload))
 
 
-# ---------------------------------------------------------------------------
-# Silver — declared one-to-one with bronze (ARCHITECTURE §3a stg_*).
-# Dependencies via function arguments + AssetIn(key_prefix=...); no deps=[].
-# ---------------------------------------------------------------------------
-
-
-@asset(
-    key_prefix="silver",
-    description=(
-        "Validated TMDB films, one-to-one with bronze.raw_tmdb. Declared now so "
-        "lineage exists; dbt will own the transform when models land."
-    ),
-    ins={"raw_tmdb": AssetIn(key_prefix="bronze")},
-)
-def stg_films(raw_tmdb: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("bronze/raw_tmdb"),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-@asset(
-    key_prefix="silver",
-    description=(
-        "Validated landing-file sessions, one-to-one with bronze.raw_landing_files. "
-        "Declared for lineage; dbt will own the transform."
-    ),
-    ins={"raw_landing_files": AssetIn(key_prefix="bronze")},
-)
-def stg_landing_files(raw_landing_files: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("bronze/raw_landing_files"),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-@asset(
-    key_prefix="silver",
-    description=(
-        "Validated cinema_ops bookings, one-to-one with bronze.raw_cinema_ops. "
-        "Declared for lineage; dbt will own the transform."
-    ),
-    ins={"raw_cinema_ops": AssetIn(key_prefix="bronze")},
-)
-def stg_cinema_ops(raw_cinema_ops: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("bronze/raw_cinema_ops"),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-@asset(
-    key_prefix="silver",
-    description=(
-        "Validated ticketing events, one-to-one with bronze.raw_ticketing. "
-        "Declared for lineage; dbt will own the transform."
-    ),
-    ins={"raw_ticketing": AssetIn(key_prefix="bronze")},
-)
-def stg_ticketing(raw_ticketing: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("bronze/raw_ticketing"),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-# ---------------------------------------------------------------------------
-# Gold — serving facts/dims named in ARCHITECTURE §3a / §5a.
-# Multiple upstreams as function args → the readable implicit graph.
-# ---------------------------------------------------------------------------
-
-
-@asset(
-    key_prefix="gold",
-    description=(
-        "One film, one version of its attributes (SCD2). Freshness inherits "
-        "raw_tmdb ≤ 24h. Declared for lineage; dbt will own the transform."
-    ),
-    ins={"stg_films": AssetIn(key_prefix="silver")},
-)
-def dim_film(stg_films: None) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstream": MetadataValue.text("silver/stg_films"),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-@asset(
-    key_prefix="gold",
-    description=(
-        "One ticket sold — one seat, one showtime, one transaction line. Headline "
-        "freshness promise ≤ 3h behind source (ARCHITECTURE §5a). Depends on "
-        "ticketing events, cinema_ops bookings, and film attributes via function "
-        "arguments."
-    ),
-    ins={
-        "stg_ticketing": AssetIn(key_prefix="silver"),
-        "stg_cinema_ops": AssetIn(key_prefix="silver"),
-        "stg_films": AssetIn(key_prefix="silver"),
-        "stg_landing_files": AssetIn(key_prefix="silver"),
-    },
-)
-def fct_ticket_sale(
-    stg_ticketing: None,
-    stg_cinema_ops: None,
-    stg_films: None,
-    stg_landing_files: None,
-) -> MaterializeResult:
-    return MaterializeResult(
-        metadata={
-            "upstreams": MetadataValue.text(
-                "silver/stg_ticketing, silver/stg_cinema_ops, "
-                "silver/stg_films, silver/stg_landing_files"
-            ),
-            "owner": MetadataValue.text("dbt"),
-        }
-    )
-
-
-@asset(
-    key_prefix="gold",
-    description=(
-        "One booking transaction — whatever number of tickets it contained. "
-        "Keys + measures only (ARCHITECTURE §3a / VDE-25). Orphan film_key "
-        "check is C1 (ARCHITECTURE §5c); freshness ≤ 3h with the ticket grain."
-    ),
-    ins={
-        "dim_film": AssetIn(key_prefix="gold"),
-        "stg_cinema_ops": AssetIn(key_prefix="silver"),
-        "stg_ticketing": AssetIn(key_prefix="silver"),
-    },
-)
-def fct_booking(
-    dim_film: None,
-    stg_cinema_ops: None,
-    stg_ticketing: None,
-) -> MaterializeResult:
-    """Lineage declaration for the dbt gold.fct_booking model; checks attach here."""
-    return MaterializeResult(
-        metadata={
-            "upstreams": MetadataValue.text(
-                "gold/dim_film, silver/stg_cinema_ops, silver/stg_ticketing"
-            ),
-            "owner": MetadataValue.text("dbt"),
-            "grain": MetadataValue.text(
-                "one booking transaction, any ticket count"
-            ),
-        }
-    )
-
-
 BRONZE_ASSETS = [raw_tmdb, raw_landing_files, raw_cinema_ops, raw_ticketing]
-SILVER_ASSETS = [stg_films, stg_landing_files, stg_cinema_ops, stg_ticketing]
-GOLD_ASSETS = [dim_film, fct_ticket_sale, fct_booking]
-ALL_ASSETS = BRONZE_ASSETS + SILVER_ASSETS + GOLD_ASSETS
+ALL_ASSETS = BRONZE_ASSETS

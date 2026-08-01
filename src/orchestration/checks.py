@@ -115,11 +115,8 @@ FRESHNESS_CHECKS = [
         lower_bound_delta=timedelta(hours=24),
         severity=AssetCheckSeverity.WARN,
     ),
-    *build_last_update_freshness_checks(
-        assets=[AssetKey(["gold", "fct_ticket_sale"])],
-        lower_bound_delta=timedelta(hours=3),
-        severity=AssetCheckSeverity.WARN,
-    ),
+    # Headline ≤ 3h promise (ARCHITECTURE §5a named this fct_ticket_sale; the
+    # executable gold fact today is fct_booking — VDE-29 dbt assets).
     *build_last_update_freshness_checks(
         assets=[AssetKey(["gold", "fct_booking"])],
         lower_bound_delta=timedelta(hours=3),
