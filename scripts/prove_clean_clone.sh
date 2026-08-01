@@ -6,9 +6,11 @@
 #
 # Exit 0 only when:
 #   - db service is healthy
+#   - redpanda-init service exited 0 (topics created)
 #   - seed service exited 0
 #   - gold.fct_booking count > 0 (verified exec + host psql, counts must agree)
 #   - count remains > 0 after removing .env
+#   - dagster and agent-tools reach healthy
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -102,6 +104,27 @@ echo "==> compose ps"
 docker compose -p "${PROJECT}" ps
 
 echo ""
+echo "==> assert redpanda-init exited 0"
+RP_INIT_CID=$(docker compose -p "${PROJECT}" ps -q -a redpanda-init 2>/dev/null || echo "")
+if [[ -z "${RP_INIT_CID}" ]]; then
+  echo "FAIL: redpanda-init container not found — was the stack brought up?" >&2
+  exit 1
+fi
+RP_INIT_STATE=$(docker inspect "${RP_INIT_CID}" --format '{{.State.Status}}' 2>/dev/null || echo "")
+RP_INIT_EXIT=$(docker inspect "${RP_INIT_CID}" --format '{{.State.ExitCode}}' 2>/dev/null || echo "99")
+echo "  redpanda-init: state=${RP_INIT_STATE} exit=${RP_INIT_EXIT}"
+if [[ "${RP_INIT_STATE}" != "exited" ]]; then
+  echo "FAIL: redpanda-init is in state '${RP_INIT_STATE}', expected 'exited'" >&2
+  docker compose -p "${PROJECT}" logs --tail=40 redpanda-init
+  exit 1
+fi
+if [[ "${RP_INIT_EXIT}" != "0" ]]; then
+  echo "FAIL: redpanda-init exited with code ${RP_INIT_EXIT}" >&2
+  docker compose -p "${PROJECT}" logs --tail=40 redpanda-init
+  exit 1
+fi
+
+echo ""
 echo "==> count via docker exec (inside db container)"
 COUNT_EXEC=$(docker compose -p "${PROJECT}" exec -T db \
   psql -U cinema -d cinema_ops -Atc "SELECT count(*) FROM gold.fct_booking;")
@@ -159,8 +182,13 @@ while true; do
     break
   fi
   if [[ $NOW -gt $HEALTH_DEADLINE ]]; then
-    echo "WARNING: dagster or agent-tools did not reach healthy within 120s (non-blocking)" >&2
-    break
+    echo "TIMEOUT: dagster or agent-tools did not reach healthy within 120s" >&2
+    docker compose -p "${PROJECT}" ps
+    echo "--- dagster logs (tail 40) ---"
+    docker compose -p "${PROJECT}" logs --tail=40 dagster
+    echo "--- agent-tools logs (tail 40) ---"
+    docker compose -p "${PROJECT}" logs --tail=40 agent-tools
+    exit 1
   fi
   sleep 5
 done
@@ -190,4 +218,4 @@ fi
 echo ""
 echo "PROOF OK"
 echo "  fct_booking_rows=${COUNT_EXEC}"
-echo "  db: healthy  seed: exited 0  grain: rows=${GRAIN_ROWS} grain_keys=${GRAIN_KEYS}  dagster: ${DAGSTER_HEALTH:-unknown}  agent-tools: ${AGENT_TOOLS_HEALTH:-unknown}"
+echo "  db: healthy  redpanda-init: exited ${RP_INIT_EXIT}  seed: exited 0  grain: rows=${GRAIN_ROWS} grain_keys=${GRAIN_KEYS}  dagster: ${DAGSTER_HEALTH:-unknown}  agent-tools: ${AGENT_TOOLS_HEALTH:-unknown}"
