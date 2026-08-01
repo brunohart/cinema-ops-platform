@@ -1,10 +1,13 @@
 """Scoped agent tokens — resolve, tool check, site bind (VDE-41).
 
-On every call:
+On every call the tools server (VDE-45) runs ``authorize`` first:
   1. hash the bearer token (sha256) and look up meta.agent_tokens
-  2. reject expired / revoked / missing / tool-not-allowed
-  3. intersect requested site_ids with the token's site_ids and bind
-     the RESULT — do not validate the caller's list; replace it.
+  2. refuse when the tool is not in allowed_tools
+  3. refuse when requested sites do not intersect / sit outside scope
+  4. refuse when the date range exceeds retention, or params fail schema
+
+``bind_site_ids`` remains for lower-level intersection. The HTTP/MCP path
+must not present an empty intersection as a successful complete answer.
 """
 
 from __future__ import annotations

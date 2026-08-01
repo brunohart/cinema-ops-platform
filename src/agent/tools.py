@@ -1,37 +1,32 @@
-"""Bounded agent tool surface over gold (ADR-009).
+"""Read-only gold tools — the only surface an agent can reach.
 
-VDE-48: fixed tools (`get_film`, `get_session_occupancy`, `get_site_revenue`)
-dispatched through ``invoke_tool``, with every call written to
-``meta.agent_access_log`` — including refusals.
+ADR-009: a fixed parameterised tool set, not a SQL endpoint. ARCHITECTURE §6c:
+PII fields are not in any response shape. The query never selects them; the
+dict returned has no key for them; agent_reader holds no grant on them.
 
-VDE-41: ``get_site_performance`` is the HTTP tools-server entrypoint. The
-caller passes *already-bound* site_ids (intersection with the token scope);
-this module does not re-check authorisation — it binds what it is given.
+Two complementary entry points:
 
-ARCHITECTURE §6c: PII fields are not in any response shape. The query never
-selects them; the dict returned has no key for them; agent_reader holds no
-grant on them.
+- ``invoke_tool`` — VDE-48 red-team surface (get_film / occupancy / revenue);
+  every invocation is written to meta.agent_access_log, including refusals.
+- ``get_site_performance`` — VDE-41/45 token-scoped HTTP tool; site scope is
+  enforced by ``agent.refuse.authorize`` before this runs.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from decimal import Decimal
+from datetime import date
 from typing import Any, Sequence
 
 import psycopg
 from psycopg.rows import dict_row
 
-# ---------------------------------------------------------------------------
-# VDE-41 — scoped-token HTTP tool (site_ids already bound by the server)
-# ---------------------------------------------------------------------------
 
-# Tool name as registered on meta.agent_tokens.allowed_tools and on the HTTP path.
+# Token-scoped HTTP tool (VDE-41 / VDE-45). Kept alongside the VDE-48 red-team
+# surface; the Bearer tools server binds site scope before calling this.
 GET_SITE_PERFORMANCE = "get_site_performance"
 
-# Columns selected for get_site_performance. Absence, not redaction:
-# nothing personal is in this list, so nothing personal can leave.
 _SITE_PERFORMANCE_COLUMNS = (
     "site_id",
     "show_date",
@@ -42,6 +37,8 @@ _SITE_PERFORMANCE_COLUMNS = (
 
 
 def _jsonable(value: Any) -> Any:
+    from decimal import Decimal
+
     if isinstance(value, Decimal):
         return float(value)
     if hasattr(value, "isoformat"):
@@ -53,63 +50,49 @@ def get_site_performance(
     conn: psycopg.Connection,
     site_ids: Sequence[int],
     *,
-    limit: int | None = None,
+    date_from: date | None = None,
+    date_to: date | None = None,
 ) -> dict[str, Any]:
     """Site daily performance for the *bound* site_ids only.
 
-    ``site_ids`` must already be the intersection with the token's scope —
-    this function does not re-check authorisation; it binds what it is given.
-
-    Optional ``limit`` (VDE-44) clips the result and sets ``truncated``.
+    ``site_ids`` must already have passed the VDE-45 refusal gate — this
+    function does not re-check authorisation; it binds what it is given.
     """
     bound = [int(s) for s in site_ids]
     if not bound:
-        body: dict[str, Any] = {
-            "tool": GET_SITE_PERFORMANCE,
-            "site_ids": [],
-            "rows": [],
-        }
-        if limit is not None:
-            body["truncated"] = False
-            body["limit"] = limit
-        return body
+        # Should be unreachable after the refusal gate (empty bind is refused
+        # when the caller named sites). Kept as a belt for direct callers.
+        return {"tool": GET_SITE_PERFORMANCE, "site_ids": [], "rows": []}
 
     cols = ", ".join(_SITE_PERFORMANCE_COLUMNS)
-    # Fetch limit+1 when capped so truncated can be labelled without COUNT(*).
-    fetch_sql = f"""
+    clauses = ["site_id = ANY(%s)"]
+    args: list[Any] = [bound]
+    if date_from is not None:
+        clauses.append("show_date >= %s")
+        args.append(date_from)
+    if date_to is not None:
+        clauses.append("show_date <= %s")
+        args.append(date_to)
+
+    where = " AND ".join(clauses)
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(
+            f"""
             SELECT {cols}
               FROM gold.site_performance
-             WHERE site_id = ANY(%s)
+             WHERE {where}
              ORDER BY site_id, show_date
-            """
-    params: list[Any] = [bound]
-    if limit is not None:
-        fetch_sql += " LIMIT %s"
-        params.append(int(limit) + 1)
-
-    with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(fetch_sql, params)
+            """,
+            args,
+        )
         rows = cur.fetchall()
 
-    truncated = False
-    if limit is not None and len(rows) > limit:
-        truncated = True
-        rows = rows[:limit]
-
-    body = {
+    return {
         "tool": GET_SITE_PERFORMANCE,
         "site_ids": bound,
         "rows": [{k: _jsonable(r[k]) for k in _SITE_PERFORMANCE_COLUMNS} for r in rows],
     }
-    if limit is not None:
-        body["truncated"] = truncated
-        body["limit"] = limit
-    return body
 
-
-# ---------------------------------------------------------------------------
-# VDE-48 — red-team / invoke_tool bounded surface
-# ---------------------------------------------------------------------------
 
 # The bounded surface. A request for anything else is refused and logged.
 TOOL_NAMES = frozenset(
@@ -124,10 +107,7 @@ TOOL_NAMES = frozenset(
 def _dsn() -> str:
     return os.environ.get(
         "AGENT_DATABASE_URL",
-        os.environ.get(
-            "DATABASE_URL",
-            "postgresql://agent_reader:agent_reader@localhost:5432/cinema_ops",
-        ),
+        os.environ.get("DATABASE_URL", "postgresql://agent_reader:agent_reader@localhost:5432/cinema_ops"),
     )
 
 

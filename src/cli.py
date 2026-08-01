@@ -263,7 +263,7 @@ def _bootstrap_agent_schema(dsn: str) -> None:
     apply_schema_files(
         dsn,
         str(root / "sql" / "init" / "001_schemas.sql"),
-        str(root / "sql" / "meta" / "004_agent_tokens.sql"),
+        str(root / "sql" / "meta" / "003_agent_tokens.sql"),
     )
 
 
@@ -361,7 +361,7 @@ def cmd_serve_tools(args: argparse.Namespace) -> int:
     _load_dotenv()
     from agent.server import main as agent_main
 
-    argv = ["--host", args.host, "--port", str(args.port)]
+    argv = ["--host", args.host, "--port", str(args.port), "--require-env-token"]
     if args.dsn:
         argv.extend(["--dsn", args.dsn])
     return agent_main(argv)
@@ -499,7 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     consume_events_p.set_defaults(func=cmd_consume_events)
 
-    agent = sub.add_parser("agent", help="Scoped agent tokens + tools server (VDE-41)")
+    agent = sub.add_parser("agent", help="Scoped agent tokens + tools server (VDE-41/45)")
     agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)
 
     mint = agent_sub.add_parser(
@@ -532,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_p = agent_sub.add_parser(
         "serve",
-        help="HTTP tools server on :8787 (Authorization: Bearer)",
+        help="HTTP tools server on :8787 (scoped Bearer + refusal gate)",
     )
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8787)

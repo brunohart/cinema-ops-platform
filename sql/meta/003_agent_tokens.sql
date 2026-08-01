@@ -6,9 +6,10 @@
 -- aspiration in a README.
 --
 -- Only the sha256 of the bearer token is stored. The plaintext never lands.
--- On every call the tools server resolves the hash, intersects requested
--- site_ids with the token's site_ids, and binds the RESULT — it does not
--- validate the caller's list and reject; it replaces it.
+-- On every call the tools server resolves the hash, then runs the VDE-45
+-- refusal gate (tool allowlist, site scope, retention, schema). Out-of-scope
+-- site requests are declined with {refused, reason, suggestion} — never
+-- returned as an empty row set presented as complete.
 
 CREATE SCHEMA IF NOT EXISTS meta;
 CREATE SCHEMA IF NOT EXISTS gold;
