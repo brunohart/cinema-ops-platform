@@ -21,31 +21,34 @@ enforcement runs in CI.
 
 | path | role |
 |------|------|
-| `scripts/scan_secrets.py` | stdlib-only classifier — Tier A (provider-shaped) and Tier B (secret-named) over full git history and working tree; exits 0/1/2; also checks `.env.example` completeness |
-| `scripts/prove_no_secrets.sh` | proof script — git sanity, issue-shaped grep (reported, not gated), classifier, `.env` never committed, `.gitignore` coverage, `.env.example` sign-off |
+| `scripts/scan_secrets.py` | stdlib-only classifier — Tier A (provider-shaped) and Tier B (secret-named) over full git history and working tree; exits 0/1/2; also checks `.env.example` completeness; `--self-check` runs synthetic kill-test |
+| `scripts/prove_no_secrets.sh` | proof script — step 0: synthetic kill-test; steps 1–6: git sanity, issue-shaped grep (reported, not gated), classifier, `.env` never committed, `.gitignore` coverage, `.env.example` sign-off |
 | `.env.example` | rewritten — every key present, every value blank; no credential-bearing URL anywhere in the file |
 | `.github/workflows/secret-scan.yml` | first CI workflow; runs `prove_no_secrets.sh` on push and pull\_request with `fetch-depth: 0` |
 | `docs/2026-08-01-vde-51-secrets-out.md` | this artefact |
 | `DECISIONS.md` | ADR-014 appended |
 | `ARCHITECTURE.md` | §10 row appended |
 | `README.md` | two rows appended (Prove it table + build-log table) |
-| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify entries |
+| `docs/agent-ledger/ledger.jsonl` | plan, implement, verify, verify-fail, implement (fix-pass) entries |
 
 ## Proof
 
 ```
 $ ./scripts/prove_no_secrets.sh
+--- scanner self-check (synthetic kill-test)
+self-check: all kill-check and account-check assertions passed
+
 --- git sanity
   inside work tree: yes
   shallow clone: no
 
 --- issue-shaped grep over full history (reported; gate is classifier below)
-  issue-shaped grep over full history: 17 matching lines
+  issue-shaped grep over full history: 19 matching lines
   (classified below; a history count can only grow — see docs/2026-08-01-vde-51-secrets-out.md)
 
 --- credential classifier (tier A + tier B + .env.example)
 tier A hits: 0
-tier B matches: 70  (blank=2  expression=22  interpolation=4  low-entropy=2  placeholder=6  prose=31  regex-pattern=3)
+tier B matches: 102  (blank=2  expression=22  interpolation=8  local-dev=2  low-entropy=2  placeholder=7  prose=56  regex-pattern=3)
 unaccounted: 0
 env-example: blank-valued and complete
 
@@ -71,24 +74,25 @@ The issue-shaped command:
 git log -p | grep -ncE "api[_-]?key=.+|password=.+|xoxb-|hooks.slack.com/services/"
 ```
 
-returned **13** matching lines. That number is in the proof output above, but it is **not the gate**.
-A history-based count can only grow: blanking `.env.example` added lines to the diff, so the
-number went up, not to zero. Anyone chasing zero would reach for `git filter-repo`, which the
-audit-trail rule forbids. The gate is `unaccounted: 0`.
+returned **19** matching lines as of the commit this proof was captured against. That number is
+**not the gate** — a history-based count can only grow: blanking `.env.example` added lines to
+the diff, and later fix-pass commits add more. Anyone chasing zero would reach for `git
+filter-repo`, which the audit-trail rule forbids. The gate is `unaccounted: 0`.
 
 ### Classification of every match
 
-All 13 lines fall into accounted Tier B categories:
+All 102 Tier B matches fall into accounted categories:
 
 | category | count | examples |
 |----------|-------|---------|
-| `expression` | several | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py |
-| `interpolation` | several | `PGPASSWORD="${DBT_PASSWORD:-cinema}"` and `${TOKEN}` in prove scripts |
-| `placeholder` | several | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL, `.../` path can't match Tier A) |
-| `prose` | several | inline comments that contain the word `password` in a sentence |
-| `blank` | a few | `TMDB_API_KEY=` blank assignments in `.env.example` history |
-| `low-entropy` | a few | short values like local port numbers |
-| `regex-pattern` | 1 | the prove script's old form contained `pass_word=.+` in a grep pattern literal — value contains `\|` (pipe), structurally impossible in any real credential |
+| `prose` | 56 | inline comments containing `password`, `token`, `secret` in a sentence |
+| `expression` | 22 | `api_key=api_key,` in cli.py; `token: AgentToken,` in TypeScript; `webhook = resolve_slack_webhook_url()` in alerts.py |
+| `interpolation` | 8 | `${TOKEN}`, `${DBT_PASSWORD:-cinema}` in prove scripts and configs |
+| `placeholder` | 7 | `SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...` (placeholder URL, `.../` path can't match Tier A) |
+| `local-dev` | 2 | ADR-010 local-dev identities (`cinema`, `agent_reader`) in DSN values |
+| `low-entropy` | 2 | short values or repeated-pattern values below the 3.0 bits/char threshold |
+| `blank` | 2 | `TMDB_API_KEY=` blank assignments in `.env.example` history |
+| `regex-pattern` | 3 | prove script grep patterns containing `.+` quantifiers — structurally impossible in any real credential |
 
 The classifier gates on **value shape only** — never on file path. A path exclusion is how a real
 secret hides in an allowlisted file.
