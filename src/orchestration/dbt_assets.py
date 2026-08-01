@@ -9,8 +9,9 @@ Note: no ``from __future__ import annotations`` here — Dagster validates the
 it into a string that fails that check.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import urlparse
 
 from dagster import AssetExecutionContext, AssetKey

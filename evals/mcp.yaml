@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=https://promptfoo.dev/config-schema.json
+#
+# VDE-47 — Eval suite over the MCP server.
+#
+# The server itself is the target under test, not a model that happens to call
+# it. Every assertion is deterministic — one correct answer, no model call.
+#
+# Subject: access behaviour at the boundary (ADR-009 / ARCHITECTURE §6c).
+#   - in-scope site returns rows
+#   - out-of-scope site is refused, not silently emptied
+#   - no PII field appears in any response
+#
+# Proof:
+#   npx promptfoo@latest eval -c evals/mcp.yaml
+#   npx promptfoo@latest eval -c evals/mcp.yaml --output evals/results.json
+
+description: "cinema-ops MCP boundary — contract, scope refusal, PII absence"
+
+prompts:
+  - '{"tool":"{{tool}}","args":{{args}}}'
+
+providers:
+  - id: mcp
+    label: cinema-ops-mcp
+    config:
+      enabled: true
+      server:
+        command: node
+        args: [dist/mcp.js]
+        name: cinema-ops
+      # Unwrap MCP content blocks so assertions see the tool JSON payload.
+      transformResponse: file://unwrap-mcp.js
+      # Keep tool calls sequential — one stdio server under test.
+      timeout: 30000
+
+tests:
+  - description: "in-scope site returns rows"
+    vars:
+      tool: get_site_performance
+      args: '{"siteIds":[1]}'
+    assert:
+      - type: is-json
+      - type: javascript
+        value: "JSON.parse(output).rows.length > 0"
+      - type: javascript
+        value: "JSON.parse(output).refused !== true"
+
+  - description: "out-of-scope site is refused, not silently emptied"
+    vars:
+      tool: get_site_performance
+      args: '{"siteIds":[9]}'
+    assert:
+      - type: is-json
+      - type: javascript
+        value: "JSON.parse(output).refused === true"
+      - type: javascript
+        value: "!Array.isArray(JSON.parse(output).rows) || JSON.parse(output).rows.length === 0"
+
+  - description: "no PII field appears in any response"
+    vars:
+      tool: get_film_attendance
+      args: "{}"
+    assert:
+      - type: is-json
+      - type: not-contains
+        value: "customer_email"
+      - type: not-contains
+        value: "customer_name"
+      - type: not-contains
+        value: "loyalty_number"
+      - type: javascript
+        value: "JSON.parse(output).rows.length > 0"
+
+evaluateOptions:
+  maxConcurrency: 1
+  showProgressBar: false
