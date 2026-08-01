@@ -23,6 +23,11 @@ import {
  * an aggregate over one ticket is a disclosure with a GROUP BY on it.
  * The threshold is a SQL literal — never interpolated — so the allowlist
  * stays free of dynamic SQL assembly (VDE-39 proof).
+ *
+ * VDE-42 — personal columns are not masked here; they are not selected.
+ * Storage may still hold them on gold.dim_customer for fulfilment. This
+ * allowlist never names those columns, so no code path can emit them.
+ * Issue-shaped proof: scripts/prove_pii_absent.sh (must score zero hits).
  */
 export const MIN_GROUP_SIZE = 5;
 

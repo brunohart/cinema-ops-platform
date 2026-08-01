@@ -2,12 +2,17 @@
   "name": "cinema-ops-agent-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Bounded agent read path — allowlisted QUERIES (VDE-39) exposed as MCP tools (VDE-40)",
+  "description": "Bounded agent read path — allowlisted QUERIES (VDE-39), PII-absent shapes (VDE-42), MCP tools (VDE-40)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
     "cinema-ops-mcp": "./dist/mcp.js"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./queries": "./dist/queries.js",
+    "./schemas": "./src/schemas.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -15,6 +20,7 @@
     "mcp": "node dist/mcp.js",
     "prove": "bash ../scripts/prove_allowlisted_queries.sh",
     "prove:mcp": "bash ../scripts/prove_mcp.sh",
+    "prove-pii-absent": "bash ../scripts/prove_pii_absent.sh",
     "inspector": "npm run build && npx @modelcontextprotocol/inspector node dist/mcp.js"
   },
   "engines": {

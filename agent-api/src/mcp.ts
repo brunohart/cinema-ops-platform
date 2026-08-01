@@ -22,10 +22,12 @@ import {
 } from "./tools.js";
 
 function resolveDb(): DbHandle {
-  if (process.env.AGENT_MCP_FIXTURE === "1" || !process.env.DATABASE_URL) {
+  const databaseUrl =
+    process.env.AGENT_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (process.env.AGENT_MCP_FIXTURE === "1" || !databaseUrl) {
     return createFixtureDb();
   }
-  return createDb(process.env.DATABASE_URL);
+  return createDb(databaseUrl);
 }
 
 export function createMcpServer(db: DbHandle = resolveDb()): McpServer {

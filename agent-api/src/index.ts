@@ -19,6 +19,8 @@ export {
   type ToolName,
 } from "./tools.js";
 export {
+  AGENT_OUTPUT_SCHEMAS,
+  CLASSIFICATION_AGENT_EXCLUDED,
   DateWindowInputSchema,
   FilmAttendanceOutputSchema,
   FilmAttendanceRowSchema,

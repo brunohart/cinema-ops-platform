@@ -1,11 +1,20 @@
 import { z } from "zod";
 
 /**
- * Explicit output shapes for agent tools (VDE-40 / ARCHITECTURE §6c).
+ * Explicit output shapes for agent tools (VDE-40 / VDE-42 / ARCHITECTURE §6c).
  *
- * PII is absent — not masked. No customer_email, customer_name, loyalty_number,
- * marketing_consent, customer_key, or seat_label appears in any schema below.
- * Tools map DB rows through these schemas; raw result sets never leave the server.
+ * PII fields are not in any agent tool's response shape. Not redacted — absent.
+ * A column that does not appear here cannot leak through the tool interface,
+ * regardless of what gold still holds.
+ *
+ * Cross-check against ARCHITECTURE §6b classification table:
+ *   PII on dim_customer → customer_email, customer_name, loyalty_number,
+ *   marketing_consent — none of those names exist in AGENT_OUTPUT_SCHEMAS.
+ *   pseudonym (customer_key) is also agent-excluded (§6a).
+ *   seat_label is never returned alongside a person key (§6d).
+ *
+ * Keys match `QUERIES` in queries.ts. MCP tools map DB rows through the Zod
+ * schemas below — raw result sets never leave the server.
  */
 
 /** One site's box-office rollup for a date window. */
@@ -67,3 +76,20 @@ export const DateWindowInputSchema = z.object({
     .describe("Maximum rows to return (1–500)."),
 });
 export type DateWindowInput = z.infer<typeof DateWindowInputSchema>;
+
+/** Declared output field names keyed by allowlisted query — VDE-42 checklist surface. */
+export const AGENT_OUTPUT_SCHEMAS = {
+  site_performance: ["site_name", "rev", "admits"],
+  film_attendance: ["film_title", "admits", "rev"],
+  list_sessions: ["session_id", "site_name", "film_title", "starts_at"],
+} as const;
+
+/** Every classification-table PII / agent-excluded field — must not appear above. */
+export const CLASSIFICATION_AGENT_EXCLUDED = [
+  "customer_email",
+  "customer_name",
+  "loyalty_number",
+  "marketing_consent",
+  "customer_key",
+  "seat_label",
+] as const;
