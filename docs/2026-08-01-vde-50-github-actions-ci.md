@@ -106,12 +106,42 @@ Total: 6 module-level overrides. No wildcard `module = "*"` used.
 
 ---
 
-## Actions URL
+## Actions run 30683442782
 
-_Pending: the specific Actions run URL will be filled in by the parent once the CI run triggered by
-[PR #44](https://github.com/brunohart/cinema-ops-platform/pull/44) completes. Do not invent a URL._
+**URL:** https://github.com/brunohart/cinema-ops-platform/actions/runs/30683442782
+**Workflow page:** https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml
 
-Workflow page: `https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml`
+### Per-job verdict
+
+| job | verdict | notes |
+|---|---|---|
+| `integration` | **success** | All steps green: bronze DDL apply, dbt build, dbt test guard, idempotency check, testcontainers integration tests |
+| `lint` | **failure** | ruff initially failed on 5 pre-existing findings (UP035 + I001 × 3 + E501); mypy was green; `pytest -m "not integration"` failed on VDE-11 immutability tests as expected |
+
+### Short evidence
+
+```
+2 failed, 144 passed, 4 skipped
+```
+
+`src/extractors/postgres.py:65` TRUNCATE line (VDE-11 root cause):
+
+```python
+cur.execute(f"TRUNCATE {table} RESTART IDENTITY CASCADE")
+```
+
+### Ruff follow-up (this commit)
+
+Five pre-existing findings fixed with `ruff check --fix .` — no behavior changes:
+
+| file | rule | fix |
+|---|---|---|
+| `src/orchestration/dbt_assets.py:13` | UP035 | `Mapping` moved from `typing` → `collections.abc` |
+| `src/stores/pipeline_runs.py:13` | I001 | blank line added between stdlib and third-party imports |
+| `tests/integration/conftest.py:15` | I001 | blank line added before `try:` block |
+| `tests/integration/test_medallion_dag.py:20` | I001 + E501 | long import split into parenthesised block |
+
+After this fix, a subsequent push should show ruff green in the `lint` job; only the VDE-11 unit failures remain by design.
 
 ---
 
