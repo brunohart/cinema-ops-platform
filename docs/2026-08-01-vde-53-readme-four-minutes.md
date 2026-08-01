@@ -40,9 +40,9 @@ The repository had no Makefile and no single entry point that brought up Postgre
 
 ### 4. Essay and argument demoted below the fold
 
-The "Two paths out of a platform" mermaid, "An agent is a consumer with no judgement" prose, "The shape of the thing" diagram, and all supporting tables moved into `<details>` blocks below the fold. No prose was deleted; none was reworded. The decision log (`ARCHITECTURE.md` §10) records this as a structural choice: a reviewer who never reaches the proof table has not been persuaded of anything.
+The "Two paths out of a platform" mermaid, "An agent is a consumer with no judgement" prose, "The shape of the thing" diagram, and all supporting tables moved into `<details>` blocks below the fold. **Note (post-verify correction):** four fragments from the base README were silently dropped during the restructure — the epigraph blockquote, the essay-dependency paragraph, the all-predicted `[!NOTE]`, and the "Trustworthy data layer" sentence — and were restored after a verifier fail finding. The original artefact line 43 incorrectly claimed "No prose was deleted; none was reworded." The decision log (`ARCHITECTURE.md` §10) records this as a structural choice: a reviewer who never reaches the proof table has not been persuaded of anything.
 
-## Proof — verbatim captured output
+## Proof — verbatim captured output (updated after verify-fail fix)
 
 ```
 $ ./scripts/prove_readme_structure.sh && ./scripts/quickstart.sh --check
@@ -53,15 +53,15 @@ $ ./scripts/prove_readme_structure.sh && ./scripts/quickstart.sh --check
 == 3. badge ordering — shields.io after slot-2 image, no <img before H1 ==
   ok   — no shields.io before slot-2 image, no <img before H1
 == 4. every local link and image target resolves on disk ==
-  ok   — all 34 local targets resolve
+  ok   — all 38 local targets resolve
 == 5. section-3 failure-mode table matches ARCHITECTURE.md §2 sources ==
-  ok   — section-3 sources match ARCHITECTURE.md §2 (4 rows)
+  ok   — section-3 (source, failure) pairs match ARCHITECTURE.md §2 (5 rows)
 == 6. quickstart block — git clone, script line, exists and executable ==
   ok   — git clone + script line; scripts/quickstart.sh exists, is executable, URL matches PRINTED_URL
 == 7. section 5 — agent_access_log, absent, no PII column names ==
   ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names
 == 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words ==
-  ok   — section 6 has 6 bullets; sections 1–6 are 985 words (≤ 1300)
+  ok   — section 6 has 7 bullets; sections 1–6 are 1014 words (≤ 1300)
 
 == bash -n scripts/quickstart.sh ==
   ok   — bash -n scripts/quickstart.sh
@@ -69,7 +69,10 @@ $ ./scripts/prove_readme_structure.sh && ./scripts/quickstart.sh --check
 == ./scripts/quickstart.sh --check ==
 quickstart: check ok — http://127.0.0.1:3000
 
-PASS=8
+== 9. below-fold sentinel phrases still appear ==
+  ok   — all 4 sentinel phrases present below the fold
+
+PASS=9
 quickstart: check ok — http://127.0.0.1:3000
 ```
 
