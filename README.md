@@ -343,6 +343,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
+| MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -491,6 +492,8 @@ dbt/
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
+mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
+evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
