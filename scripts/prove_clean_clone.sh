@@ -36,8 +36,17 @@ export AGENT_TOOLS_PORT="${AGENT_TOOLS_PORT:-18787}"
 export AGENT_READER_PASSWORD="${AGENT_READER_PASSWORD:-agent_reader_test}"
 export AGENT_TOOL_TOKEN="${AGENT_TOOL_TOKEN:-test-token-vde49}"
 
+echo "==> ensure Docker bridge forwarding rules are in place"
+# Ensure forward rules cover custom bridge networks (br-* interfaces).
+# Docker's default iptables setup may only accept docker0 traffic; custom
+# compose networks use br-* bridges that need forwarding allowed explicitly.
+# Idempotent: only inserts if the rule is not already present.
+sudo iptables-legacy -C DOCKER-FORWARD -j ACCEPT 2>/dev/null \
+  || sudo iptables-legacy -I DOCKER-FORWARD 1 -j ACCEPT 2>/dev/null || true
+
 echo "==> clone HEAD to ${STRANGERTEST}"
-git clone "${ROOT}" "${STRANGERTEST}"
+# --no-local avoids hardlink optimization that fails on some container filesystems.
+git clone --no-local "${ROOT}" "${STRANGERTEST}"
 
 cd "${STRANGERTEST}"
 
@@ -45,7 +54,10 @@ echo "==> cp .env.example .env"
 cp .env.example .env
 
 echo "==> docker compose -p ${PROJECT} up -d --build"
-docker compose -p "${PROJECT}" up -d --build
+# compose up exits non-zero when seed fails (depends_on completed_successfully).
+# Use || true here: the polling below captures the actual seed exit code and
+# fails with a descriptive message, rather than exiting silently via set -e.
+docker compose -p "${PROJECT}" up -d --build || true
 
 echo "==> poll for db healthy + seed exited 0 (max 600s)"
 DEADLINE=$(( $(date +%s) + 600 ))
@@ -78,6 +90,7 @@ while true; do
       break
     else
       echo "FAIL: seed exited with code ${SEED_EXIT}" >&2
+      echo "--- seed logs ---"
       docker compose -p "${PROJECT}" logs seed
       exit 1
     fi
