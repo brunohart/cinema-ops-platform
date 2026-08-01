@@ -13,6 +13,7 @@ from pathlib import Path
 
 import psycopg
 import pytest
+
 try:
     from testcontainers.community.postgres import PostgresContainer
 except ImportError:  # older testcontainers

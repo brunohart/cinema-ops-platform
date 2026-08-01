@@ -4,6 +4,7 @@
 
 <br>
 
+[![CI](https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml)
 [![status](https://img.shields.io/badge/status-in%20build-E0B24C?style=flat-square&labelColor=15191F)](#build-log--what-exists-today)
 [![layers](https://img.shields.io/badge/layers-bronze%20%E2%86%92%20silver%20%E2%86%92%20gold-C08B4F?style=flat-square&labelColor=15191F)](#the-shape-of-the-thing)
 [![stack](https://img.shields.io/badge/stack-Postgres%20%C2%B7%20dbt%20%C2%B7%20Dagster%20%C2%B7%20Redpanda-8C97A3?style=flat-square&labelColor=15191F)](DECISIONS.md)
@@ -344,6 +345,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
+| the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -419,9 +421,10 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
+| [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
 
-That last row is the only one with no issue id, and it stays visibly empty rather than being filled
-in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
+The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
+with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
 there was no issue to trace it to. The trail records the gap.
 
 ### How the work gets done — plan, implement, verify
