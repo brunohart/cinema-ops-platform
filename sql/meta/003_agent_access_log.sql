@@ -38,10 +38,12 @@ CREATE INDEX IF NOT EXISTS agent_access_log_at_idx
 CREATE INDEX IF NOT EXISTS agent_access_log_tool_outcome_idx
   ON meta.agent_access_log (tool, outcome);
 
+-- Role ownership: VDE-42 (sql/init/005_agent_role.sql) defines agent for
+-- gold read grants. We only ensure it exists so this file is standalone.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'agent') THEN
-    CREATE ROLE agent LOGIN PASSWORD 'agent';
+    CREATE ROLE agent LOGIN PASSWORD 'change-me-at-provision';
   END IF;
 END
 $$;

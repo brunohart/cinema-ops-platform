@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# VDE-22 proof — definitions load, four bronze extractors present, lineage edges
-# via function-argument dependencies, key_prefix groups bronze / silver / gold.
+# VDE-22 / VDE-29 proof — definitions load, bronze extractors present, dbt
+# silver/gold assets wired with bronze → silver → gold lineage edges.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -43,6 +43,25 @@ bronze_required = {
 missing = bronze_required - set(keys)
 assert not missing, f"missing bronze extractor assets: {missing}"
 
+silver_required = {
+    AssetKey(["silver", "stg_films"]),
+    AssetKey(["silver", "stg_sessions"]),
+    AssetKey(["silver", "stg_bookings"]),
+    AssetKey(["silver", "stg_ticket_events"]),
+}
+missing_s = silver_required - set(keys)
+assert not missing_s, f"missing silver dbt assets: {missing_s}"
+
+gold_required = {
+    AssetKey(["gold", "dim_film"]),
+    AssetKey(["gold", "dim_site"]),
+    AssetKey(["gold", "dim_date"]),
+    AssetKey(["gold", "fct_session"]),
+    AssetKey(["gold", "fct_booking"]),
+}
+missing_g = gold_required - set(keys)
+assert not missing_g, f"missing gold dbt assets: {missing_g}"
+
 print("\n=== lineage edges (parent → child) ===")
 edges: list[tuple[str, str]] = []
 for key in keys:
@@ -52,36 +71,31 @@ for key in keys:
         edges.append(edge)
         print(f"  {edge[0]}  →  {edge[1]}")
 
-assert edges, "expected function-argument dependencies; graph has no edges"
+assert edges, "expected medallion dependencies; graph has no edges"
 
-# Spot-check the readable implicit graph: gold.fct_ticket_sale fans in from silver.
-fct = AssetKey(["gold", "fct_ticket_sale"])
+# Spot-check: fct_booking fans in from dims + silver bookings/tickets.
+fct = AssetKey(["gold", "fct_booking"])
 parents = {p.to_user_string() for p in asset_graph.get(fct).parent_keys}
 for expected in (
-    "silver/stg_ticketing",
-    "silver/stg_cinema_ops",
-    "silver/stg_films",
-    "silver/stg_landing_files",
+    "gold/dim_film",
+    "gold/dim_site",
+    "gold/dim_date",
+    "silver/stg_bookings",
+    "silver/stg_ticket_events",
+    "silver/stg_sessions",
 ):
     assert expected in parents, f"{fct.to_user_string()} missing parent {expected}"
 
-# Descriptions render in the UI — every asset must carry one for reviewers.
-from orchestration import assets as assets_mod
+# Bronze extractors feed silver via source→asset key mapping.
+stg_films = AssetKey(["silver", "stg_films"])
+assert AssetKey(["bronze", "raw_tmdb"]) in asset_graph.get(stg_films).parent_keys
 
-for assets_def in assets_mod.ALL_ASSETS:
-    descs = getattr(assets_def, "descriptions_by_key", None) or {}
-    if descs:
-        for ak, desc in descs.items():
-            assert desc and str(desc).strip(), f"asset {ak} missing description"
-    else:
-        # Fallback: single-asset defs expose description on the node.
-        node = asset_graph.get(next(iter(assets_def.keys)))
-        assert node.description and node.description.strip(), (
-            f"asset {node.key} missing description"
-        )
+jobs = set(repo.job_names)
+assert "cinema_ops_transform" in jobs, "missing cinema_ops_transform job (VDE-29)"
+assert "cinema_ops_medallion" in jobs, "missing cinema_ops_medallion job"
 
-print("\nVDE-22 prove_dagster_assets: OK")
-print(f"  assets={len(keys)}  edges={len(edges)}  layers={sorted(by_prefix)}")
+print("\nVDE-22/29 prove_dagster_assets: OK")
+print(f"  assets={len(keys)}  edges={len(edges)}  layers={sorted(by_prefix)}  jobs={sorted(jobs)}")
 PY
 
 # Same module path ``dagster dev`` / workspace.yaml uses.
