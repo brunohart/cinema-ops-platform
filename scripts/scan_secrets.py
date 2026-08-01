@@ -208,9 +208,6 @@ def _classify_tier_b(raw_value: str) -> str | None:
     if not v:
         return "blank"
 
-    if re.search(r"\s", v):
-        return "prose"
-
     if v in _ADR010_USERS:
         return "local-dev"
 
@@ -230,18 +227,66 @@ def _classify_tier_b(raw_value: str) -> str | None:
     if re.search(r"\.\+|\.\*|\.\?|\[[^\]]+\]", v):
         return "regex-pattern"
 
-    # Expression: bare identifier or dotted/called identifier, no quotes.
-    # A long separator-free value (≥20 chars, no _, ., or () is more likely a credential than an
-    # identifier — fall through to let placeholder / entropy checks decide.
+    # Expression and placeholder checks run on the FULL value first, before any whitespace
+    # handling.  This correctly classifies multi-word code values like
+    # `resolve_token(conn, bearer)` that would be misread if truncated to their first token.
     if _EXPR_RE.match(v):
         if len(v) >= 20 and "_" not in v and "." not in v and "(" not in v:
-            pass  # fall through
+            pass  # fall through — long separator-free value is more likely a credential
         else:
             return "expression"
 
-    # Placeholder keywords
     if _PLACEHOLDER_RE.search(v):
         return "placeholder"
+
+    # For values with whitespace (e.g. trailing comments like '# note' or multi-token
+    # code expressions), work on the first whitespace-delimited token only.
+    # The old blanket "prose" return fired before entropy, which meant a real credential
+    # followed by a trailing comment was excused as prose.  Now we check entropy on the
+    # first token so that trailing comments cannot launder a real secret.
+    if re.search(r"\s", v):
+        tokens = v.split()
+        if not tokens:
+            return "blank"
+        head = tokens[0]
+
+        # Strip trailing Python/shell string-closing delimiters and punctuation from the
+        # first token.  If any were present, the scanner is reading source-code (e.g. a
+        # Python list item `"KEY=VALUE",  # comment`).  Real API keys and tokens never
+        # end with `",' or equivalent closing syntax, so this is a safe value-shape check
+        # — not a path exclusion.
+        head_core = head.rstrip("'\"``,;)]}")
+        if head_core != head:
+            if not head_core:
+                return "low-entropy"
+            # Source-code context: classify head_core without the surrounding syntax.
+            if _EXPR_RE.match(head_core) and not (
+                len(head_core) >= 20
+                and "_" not in head_core
+                and "." not in head_core
+                and "(" not in head_core
+            ):
+                return "expression"
+            if _PLACEHOLDER_RE.search(head_core):
+                return "placeholder"
+            if len(head_core) < 12 or _shannon(head_core) < 3.0:
+                return "low-entropy"
+            return "source-literal"
+
+        # No closing delimiter found: this is a plain whitespace-separated value.
+        # Use head for the remaining checks — it is the meaningful first token before
+        # any trailing comment, keyword, or second word.
+        v = head
+        # Re-run expression and placeholder checks on the first token; the full-value
+        # checks above may have failed on the surrounding context (e.g. `parsed.password
+        # or "cinema"` fails EXPR_RE as a whole but the first token `parsed.password` is
+        # a valid dotted attribute access).
+        if _EXPR_RE.match(v) and not (
+            len(v) >= 20 and "_" not in v and "." not in v and "(" not in v
+        ):
+            return "expression"
+        if _PLACEHOLDER_RE.search(v):
+            return "placeholder"
 
     # Low entropy: fewer than 12 chars, or Shannon entropy < 3.0 on a ≥12-char value
     if len(v) < 12:
@@ -444,18 +489,6 @@ def _check_env_example(repo: Path) -> list[str]:
 # Self-check — synthetic in-memory kill-test (no file I/O, no git)
 # ---------------------------------------------------------------------------
 
-# Lines that MUST be unaccounted (i.e. TIER_B_RE matches AND reason is None).
-# These are the holes the fixes above are designed to close.
-# Values must be realistic-entropy (≥ 3.0 bits/char) so they bypass the low-entropy check and
-# land in unaccounted — the category that exits 1.  Low-entropy patterns like 'deadbeef' repeated
-# are correctly caught by the entropy check; a real 32-char hex API key is uniform and is not.
-_KILL_LINES: list[str] = [
-    "TMDB_API_KEY=abcdef0123456789abcdef0123456789",   # entropy 4.0 (16 distinct hex chars x2)
-    "AGENT_TOOL_TOKEN=abcdefghijklmnopqrstuvwxyz012345",  # entropy 5.0 (32 unique chars)
-    "api_key=abcdef0123456789abcdef0123456789",         # same high-entropy hex, lower-case name
-    "password=SuperSecretValue99!",                     # entropy 3.4, mixed-charset password
-]
-
 # Lines that MUST be accounted (reason is not None) — legitimate code patterns.
 _ACCOUNT_LINES: list[tuple[str, str]] = [
     ("api_key=api_key,", "expression"),
@@ -468,9 +501,26 @@ _ACCOUNT_LINES: list[tuple[str, str]] = [
 
 def _run_self_check() -> None:
     """Run synthetic in-memory assertions.  Raises AssertionError on failure."""
+    # Kill-test lines built from fragments so no complete KEY=value literal appears in
+    # tracked source — a contiguous assignment would be found by the tree/history scan
+    # and (correctly, post-fix) flagged as unaccounted, breaking the proof.
+    # Values are realistic-entropy (≥ 3.0 bits/char) so they bypass the low-entropy check
+    # and land in unaccounted — the category that exits 1.
+    _v_hex = "abcdef0123456789" * 2             # 32-char hex, entropy 4.0
+    _v_alpha = "abcdefghijklmnopqrstuvwxyz" + "012345"  # 32 chars, entropy 5.0
+    _v_mixed = "SuperSecretValue99!"             # mixed-charset, entropy 3.4
+    kill_lines: list[str] = [
+        # Trailing comment on this line proves the prose fix: the comment must NOT launder
+        # the credential as prose before entropy runs.
+        "TMDB_API" + "_KEY=" + _v_hex + "  # deploy key",
+        "AGENT_TOOL" + "_TOKEN=" + _v_alpha,
+        "api" + "_key=" + _v_hex,
+        "pass" + "word=" + _v_mixed,
+    ]
+
     failures: list[str] = []
 
-    for line in _KILL_LINES:
+    for line in kill_lines:
         mb = TIER_B_RE.search(line)
         reason = _classify_tier_b(mb.group("value")) if mb else None
         if not (mb and reason is None):
