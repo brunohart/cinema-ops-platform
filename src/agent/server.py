@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from agent.db import connect, dsn_from_env
 from agent.limits import MAX_ROWS, effective_limit
-from agent.tools import get_site_performance
+from agent.site_performance import get_site_performance
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787

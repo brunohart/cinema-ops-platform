@@ -17,7 +17,10 @@ def dsn_from_env() -> str:
     """Prefer the agent role DSN; fall back to the local compose superuser for proofs."""
     return os.environ.get(
         "AGENT_DATABASE_URL",
-        os.environ.get("DB", "postgresql://agent_readonly:change-me-at-provision@127.0.0.1:5432/cinema_ops"),
+        os.environ.get(
+            "DB",
+            "postgresql://agent_reader:agent_reader@127.0.0.1:5432/cinema_ops",
+        ),
     )
 
 

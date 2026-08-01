@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from agent.limits import MAX_ROWS, ToolLimit, effective_limit
-from agent.tools import get_site_performance
+from agent.site_performance import get_site_performance
 
 
 def test_max_rows_is_five_hundred() -> None:

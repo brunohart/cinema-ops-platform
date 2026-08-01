@@ -12,8 +12,8 @@ being an outage.
 
 | Layer | Mechanism | Bound |
 |-------|-----------|-------|
-| Connection | `SET statement_timeout = '5s'` (+ `ALTER ROLE agent_readonly`) | 5 seconds |
-| Schema | `ToolLimit.limit: int` with `le=500` (Pydantic; curriculum: `z.number().int().max(500)`) | 500 rows |
+| Connection | `SET statement_timeout = '5s'` (+ `ALTER ROLE agent` / `agent_reader`) | 5 seconds |
+| Schema | `ToolLimit.limit: int` with `le=500` (Pydantic; curriculum / `agent-api`: `z.number().int().max(500)`) | 500 rows |
 | SQL | `LIMIT %(fetch_limit)s` with server-chosen `limit+1` — not appended by the caller | 500 rows |
 
 When a result is clipped, the response carries `truncated: true`. An agent that
@@ -44,4 +44,5 @@ true
 
 - `python -m src.cli serve tools` — HTTP tools API, bearer auth via `AGENT_TOOL_TOKEN`
 - `GET /tools/get_site_performance?limit=N` — gold `fct_showtime_performance`, PII absent
-- Role: `sql/init/005_agent_role.sql` — `SELECT` on gold only, `statement_timeout=5s`
+- Roles: `sql/init/005_agent_role.sql` (`agent`) and `005_agent_reader_role.sql` — gold read-only, `statement_timeout=5s`
+- Allowlist twin: `agent-api` `site_performance` already declares `limit.max(500)` in Zod (VDE-39)

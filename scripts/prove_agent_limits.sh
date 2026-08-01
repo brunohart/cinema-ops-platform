@@ -33,9 +33,20 @@ if ! psql "$DB_URL" -c 'select 1' >/dev/null 2>&1; then
 fi
 psql "$DB_URL" -c 'select 1' >/dev/null
 
-echo "==> apply agent role + gold grain scaffold (idempotent)"
+echo "==> apply agent roles + gold grain scaffold (idempotent)"
 psql_cmd -f sql/gold/001_fact_grains.sql >/dev/null
+# meta.agent_access_log may be required before agent_reader grants
+if [[ -f sql/meta/003_agent_access_log.sql ]]; then
+  psql_cmd -f sql/meta/003_agent_access_log.sql >/dev/null || true
+fi
+if [[ -f sql/meta/002_agent_access_log.sql ]]; then
+  psql_cmd -f sql/meta/002_agent_access_log.sql >/dev/null || true
+fi
 psql_cmd -f sql/init/005_agent_role.sql >/dev/null
+psql_cmd -f sql/init/005_agent_reader_role.sql >/dev/null
+# Local prove passwords — compose / provision override these in real envs.
+psql_cmd -c "ALTER ROLE agent PASSWORD 'change-me-at-provision';" >/dev/null
+psql_cmd -c "ALTER ROLE agent_reader PASSWORD 'agent_reader';" >/dev/null
 
 echo "==> seed >500 showtime rows so a clip is observable"
 psql_cmd <<'SQL'
@@ -121,13 +132,18 @@ if [[ "$CODE" != "401" ]]; then
   exit 1
 fi
 
-echo "==> statement_timeout is 5s on agent_readonly sessions"
-ROLE_TIMEOUT="$(PGPASSWORD=change-me-at-provision psql \
-  -h 127.0.0.1 -U agent_readonly -d cinema_ops -Atc 'SHOW statement_timeout')"
-echo "agent_readonly statement_timeout=${ROLE_TIMEOUT}"
-if [[ "$ROLE_TIMEOUT" != "5s" && "$ROLE_TIMEOUT" != "5000ms" ]]; then
-  echo "FAIL: expected agent_readonly statement_timeout=5s, got '${ROLE_TIMEOUT}'" >&2
-  exit 1
-fi
+echo "==> statement_timeout is 5s on agent / agent_reader sessions"
+check_timeout() {
+  local role="$1" pass="$2"
+  local got
+  got="$(PGPASSWORD="$pass" psql -h 127.0.0.1 -U "$role" -d cinema_ops -Atc 'SHOW statement_timeout')"
+  echo "${role} statement_timeout=${got}"
+  if [[ "$got" != "5s" && "$got" != "5000ms" ]]; then
+    echo "FAIL: expected ${role} statement_timeout=5s, got '${got}'" >&2
+    exit 1
+  fi
+}
+check_timeout agent change-me-at-provision
+check_timeout agent_reader agent_reader
 
 echo "OK — VDE-44 hard limits hold (500 rows, truncated=true, timeout=5s)"
