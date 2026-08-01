@@ -32,6 +32,9 @@ services:
       - ./sql/gold/003_agent_redteam_fixture.sql:/docker-entrypoint-initdb.d/052_agent_redteam_fixture.sql:ro
       - ./sql/init/005_agent_reader_role.sql:/docker-entrypoint-initdb.d/053_agent_reader_role.sql:ro
       - ./sql/init/006_prove_agent_reader_grants.sql:/docker-entrypoint-initdb.d/054_prove_agent_reader.sql:ro
+      # VDE-38 — read-only api role over gold (Hono agent-api/server connects as this)
+      - ./sql/init/005_api_role.sql:/docker-entrypoint-initdb.d/055_api_role.sql:ro
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
