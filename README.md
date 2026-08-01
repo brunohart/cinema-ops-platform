@@ -319,12 +319,17 @@ an assurance that it works on mine. All HTTP is mocked; there are no live API ca
 
 ```bash
 git clone https://github.com/brunohart/cinema-ops-platform && cd cinema-ops-platform
+
+# Full seeded stack — Postgres 16, Redpanda, dbt silver+gold via Dagster,
+# Dagster webserver :3000, agent-tools :8787. One command from a clean clone.
+cp .env.example .env            # port knobs; all have safe defaults
+docker compose up               # db healthy → seed exited 0 → dagster + agent-tools healthy
+
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pip install -e ".[dbt]"         # dbt-postgres for silver / gold transforms
 
 pytest -q                       # the whole suite
-docker compose up -d db         # Postgres 16, with bronze + quarantine DDL applied at init
 ```
 
 | what it proves | command | observed |
@@ -343,6 +348,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
+| `docker compose up` from a clean clone seeds gold (`fct_booking count > 0`); db+redpanda+seed+dagster+agent-tools all healthy | `./scripts/prove_clean_clone.sh` | [recorded](docs/2026-08-01-vde-49-clean-clone-compose.md) — `PROOF OK`, `fct_booking_rows=2` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -417,6 +423,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
+| — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
 
 That last row is the only one with no issue id, and it stays visibly empty rather than being filled
 in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so

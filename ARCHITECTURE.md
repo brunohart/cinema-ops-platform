@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-07-31
-**Revision count:** 6
+**Last revised:** 2026-08-01
+**Revision count:** 7
 
 ---
 
@@ -482,7 +482,17 @@ Format:
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
 
-_No corrections yet. This is expected on day zero and a red flag by day four — see section 9._
+### 2026-08-01 · [docker, sql] · CREATE TABLE IF NOT EXISTS on conflicting schema → silent no-op, then failed INSERT
+
+**Predicted:**   `sql/gold/003_agent_redteam_fixture.sql` at initdb position 052 would create a bigint-keyed `gold.dim_film` and seed it with rows for the red-team proof.
+
+**Observed:**    `sql/gold/002_sla_check_columns.sql` at position 041 had already created `gold.dim_film` with a text primary key. The `CREATE TABLE IF NOT EXISTS` at 052 silently no-oped, leaving the text-keyed schema. The subsequent INSERT (film_key bigint = 1, 2) then failed on a type mismatch — the text-keyed dim_film also lacked the `title` column that 003 assumed.
+
+**Why the gap:**  `CREATE TABLE IF NOT EXISTS` guarantees the table exists but not that its schema matches the definition provided. Treating it as idempotent schema application is incorrect when two files define the same table with incompatible key types — the second definition is invisible, not merged.
+
+**Changed:**      Removed `sql/gold/003_agent_redteam_fixture.sql` from `docker-compose.yml` initdb mounts (position 052). The red-team prove script applies it directly so the fixture runs in isolation without the schema-conflict risk. `sql/gold/003_agent_redteam_fixture.sql` is unchanged. VDE-49 (planner lesson 2026-08-01).
+
+**Cost:**         Caught by planner review before it blocked the compose stack; cost = one plan iteration.
 
 ---
 
@@ -566,3 +576,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-07-30 | `booking_id` on the ticket fact as a degenerate dimension; `booking_total` derived | store the booking total on each ticket row | an identifier isn't summed so it can't fan out; a derived number cannot drift from the rows it sums |
 | 2026-07-31 | quarantine bad rows into `bronze.quarantine` with `raw_payload`; batch continues | drop bad rows, or fail the whole batch | drop destroys evidence; fail-batch lets one bad row block a thousand good ones; quarantine is the only option that survives review (ADR-011 / VDE-14) |
 | 2026-07-31 | issues run plan (Opus) → implement (Sonnet) → verify (Opus), each phase recorded in an append-only ledger | one agent with a longer prompt | an agent that plans and builds in one breath never treats the design as a separable artefact, and one that checks its own work reads what it meant; the ledger is the only thing that carries between runs (ADR-013) |
+| 2026-08-01 | `docker compose up` from a clean clone brings up the full seeded stack — db, Redpanda, seed, Dagster, agent-tools | manual `docker run` per service | one command from a clean clone is the only developer experience that compounds; each subsequent reviewer does not have to discover the startup sequence (VDE-49) |
