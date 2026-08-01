@@ -318,9 +318,11 @@ def lesson_records(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "lesson": one_line(lesson["lesson"]),
                     "tags": [one_line(str(t), 32) for t in lesson.get("tags") or []],
                     "evidence": one_line(lesson.get("evidence") or ""),
-                    "phase": str(entry.get("phase", "")),
-                    "issue": str(entry.get("issue") or ""),
-                    "date": str(entry.get("recorded_at", ""))[:10],
+                    # Every field below also lands in a prompt, so every field is flattened —
+                    # including the ones the CLI already caps, since a line can be edited by hand.
+                    "phase": one_line(entry.get("phase", ""), 16),
+                    "issue": one_line(entry.get("issue") or "", 32),
+                    "date": one_line(str(entry.get("recorded_at", ""))[:10], 10),
                 }
             )
     return records
