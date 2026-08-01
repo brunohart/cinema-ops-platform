@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal, Mapping, Sequence
 
 from agent.tokens import AgentToken
-from agent.tools import GET_SITE_PERFORMANCE
+from agent.catalog import GET_SITE_PERFORMANCE, IMPLEMENTED_TOOLS
 
 # Stated guess (ARCHITECTURE §5): operational gold retained for agent tools.
 # Marked est. — move it when a real retention policy lands; change goes in §7.
@@ -250,13 +250,14 @@ def authorize(
     if refused is not None:
         return refused
 
-    if tool_name != GET_SITE_PERFORMANCE:
-        # Fixed tool set: anything else allowed on the token but not implemented
+    if tool_name not in IMPLEMENTED_TOOLS:
+        # Fixed tool set: anything allowed on the token but not implemented
         # is still a hard stop — not a guess at what it might mean.
+        allowed = ", ".join(repr(t) for t in IMPLEMENTED_TOOLS)
         return Refusal(
             code="tool_not_allowed",
             reason=f"Tool {tool_name!r} is not implemented on this server.",
-            suggestion=f"Retry with {GET_SITE_PERFORMANCE!r}.",
+            suggestion=f"Retry with one of: {allowed}.",
         )
 
     params = validate_params(raw_params)
