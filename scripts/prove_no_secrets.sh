@@ -13,7 +13,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# --- 0. scanner self-check (synthetic in-memory kill-test) ------------------
+echo "--- scanner self-check (synthetic kill-test)"
+
+python3 scripts/scan_secrets.py --self-check
+
 # --- 1. git sanity -----------------------------------------------------------
+echo ""
 echo "--- git sanity"
 
 if ! git rev-parse --is-inside-work-tree > /dev/null 2>&1; then

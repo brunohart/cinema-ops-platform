@@ -64,7 +64,7 @@ TIER_A_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # ---------------------------------------------------------------------------
 
 TIER_B_RE = re.compile(
-    r"(?i)\b(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)\b"
+    r"(?i)(?<![A-Za-z0-9])(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)\b"
     r"\s*[:=]\s*(?P<value>\S.*)$"
 )
 
@@ -224,14 +224,20 @@ def _classify_tier_b(raw_value: str) -> str | None:
     if re.match(r'^f["\'].*\{', v):
         return "interpolation"
 
-    # Regex / shell expression — pipe operator or regex quantifier (.+, .*, .?)
-    # are structurally impossible in any real third-party credential.
-    if "|" in v or re.search(r"\.\+|\.\*|\.\?", v):
+    # Regex / shell expression — a real regex operator (.+, .*, .?, character class) is
+    # structurally impossible in any real third-party credential.  Bare pipe alone is
+    # insufficient: a credential could contain | without being a pattern.
+    if re.search(r"\.\+|\.\*|\.\?|\[[^\]]+\]", v):
         return "regex-pattern"
 
-    # Expression: bare identifier or dotted/called identifier, no quotes
+    # Expression: bare identifier or dotted/called identifier, no quotes.
+    # A long separator-free value (≥20 chars, no _, ., or () is more likely a credential than an
+    # identifier — fall through to let placeholder / entropy checks decide.
     if _EXPR_RE.match(v):
-        return "expression"
+        if len(v) >= 20 and "_" not in v and "." not in v and "(" not in v:
+            pass  # fall through
+        else:
+            return "expression"
 
     # Placeholder keywords
     if _PLACEHOLDER_RE.search(v):
@@ -435,6 +441,67 @@ def _check_env_example(repo: Path) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Self-check — synthetic in-memory kill-test (no file I/O, no git)
+# ---------------------------------------------------------------------------
+
+# Lines that MUST be unaccounted (i.e. TIER_B_RE matches AND reason is None).
+# These are the holes the fixes above are designed to close.
+# Values must be realistic-entropy (≥ 3.0 bits/char) so they bypass the low-entropy check and
+# land in unaccounted — the category that exits 1.  Low-entropy patterns like 'deadbeef' repeated
+# are correctly caught by the entropy check; a real 32-char hex API key is uniform and is not.
+_KILL_LINES: list[str] = [
+    "TMDB_API_KEY=abcdef0123456789abcdef0123456789",   # entropy 4.0 (16 distinct hex chars x2)
+    "AGENT_TOOL_TOKEN=abcdefghijklmnopqrstuvwxyz012345",  # entropy 5.0 (32 unique chars)
+    "api_key=abcdef0123456789abcdef0123456789",         # same high-entropy hex, lower-case name
+    "password=SuperSecretValue99!",                     # entropy 3.4, mixed-charset password
+]
+
+# Lines that MUST be accounted (reason is not None) — legitimate code patterns.
+_ACCOUNT_LINES: list[tuple[str, str]] = [
+    ("api_key=api_key,", "expression"),
+    ('api_key="test-key"', "placeholder"),
+    ("TMDB_API_KEY=", "blank-or-no-match"),  # no value → no TIER_B_RE match; blank expected
+    ("token: AgentToken,", "expression"),
+    ('PGPASSWORD="${DBT_PASSWORD:-cinema}"', "any-accounted"),
+]
+
+
+def _run_self_check() -> None:
+    """Run synthetic in-memory assertions.  Raises AssertionError on failure."""
+    failures: list[str] = []
+
+    for line in _KILL_LINES:
+        mb = TIER_B_RE.search(line)
+        reason = _classify_tier_b(mb.group("value")) if mb else None
+        if not (mb and reason is None):
+            failures.append(
+                f"kill-check FAIL: {line!r} → match={bool(mb)} reason={reason!r} "
+                f"(expected: matched and unaccounted)"
+            )
+
+    for line, expected_label in _ACCOUNT_LINES:
+        mb = TIER_B_RE.search(line)
+        if mb is None:
+            # "blank-or-no-match" means no match is acceptable (empty value after =)
+            if "no-match" in expected_label:
+                continue
+            failures.append(f"account-check FAIL: {line!r} → no TIER_B_RE match (expected account)")
+            continue
+        reason = _classify_tier_b(mb.group("value"))
+        if reason is None:
+            failures.append(
+                f"account-check FAIL: {line!r} → unaccounted (expected accounted as {expected_label!r})"
+            )
+
+    if failures:
+        for f in failures:
+            print(f"SELF-CHECK: {f}", file=sys.stderr)
+        sys.exit(1)
+
+    print("self-check: all kill-check and account-check assertions passed")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -449,7 +516,16 @@ def main() -> None:
         action="store_true",
         help="skip .env.example completeness check (for bootstrapping only)",
     )
+    parser.add_argument(
+        "--self-check",
+        action="store_true",
+        help="run synthetic in-memory kill-check assertions and exit",
+    )
     args = parser.parse_args()
+
+    if args.self_check:
+        _run_self_check()
+        sys.exit(0)
 
     repo = _repo_root()
 
