@@ -1,8 +1,14 @@
 .DS_Store
 .claude/
 __pycache__/
+
+# agent-api (VDE-39)
+agent-api/node_modules/
+agent-api/dist/
+
 *.py[cod]
 .pytest_cache/
+.coverage
 .ruff_cache/
 *.egg-info/
 .venv/
@@ -18,6 +24,11 @@ var/
 storage/
 logs/
 compute_logs/
+
+# promptfoo local artefacts (VDE-48)
+.promptfoo/
+evals/output/
+promptfoo-*.json
 
 # dbt (VDE-24 project root; VDE-27 also had transform/ — see merge note)
 dbt/target/

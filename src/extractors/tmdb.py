@@ -7,7 +7,6 @@ persistence are inherited from ``BaseExtractor`` and must not be overridden.
 from __future__ import annotations
 
 import json
-import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -17,8 +16,9 @@ from datetime import date, datetime
 from typing import Any
 
 from extractors.base import BaseExtractor
+from logging_config import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 TMDB_API_BASE = "https://api.themoviedb.org"
 DISCOVER_MOVIE_PATH = "/3/discover/movie"
@@ -103,6 +103,7 @@ class TMDBExtractor(BaseExtractor):
         **kwargs: Any,
     ) -> None:
         kwargs.setdefault("source", "tmdb")
+        kwargs.setdefault("asset_key", "bronze/raw_tmdb")
         super().__init__(**kwargs)
         if not api_key:
             raise ValueError("TMDB api_key is required")
@@ -163,9 +164,9 @@ class TMDBExtractor(BaseExtractor):
                     )
                 delay = float(retry_after)
                 logger.warning(
-                    "TMDB 429 on page=%s; honouring Retry-After=%.3fs",
-                    page,
-                    delay,
+                    "tmdb.rate_limited",
+                    page=page,
+                    retry_after_seconds=delay,
                 )
                 self._sleep(delay)
                 continue
