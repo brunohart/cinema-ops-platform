@@ -459,11 +459,13 @@ applies to the operational warehouse, not to a read-only fixture demo that exist
 reviewer does not need anything installed.
 
 **Decision** A separate, stdlib-only demo server (`src/agent/demo_server.py`) runs over fixture data
-(`src/agent/demo_data.py`) and is deployed to Fly.io as a thin public surface. It reuses the real
-policy layer (`agent.refuse.authorize`, `agent.refuse.check_site_scope`, `agent.catalog`) so the
-refusal behaviour is identical to the production path — only the data source changes. The demo is
-not a replacement for the local docker-compose environment; it is an illustration of what that
-environment enforces, using fixture rows from `mcp/src/fixtures.ts`.
+(`src/agent/demo_data.py`) and can be deployed to Fly.io as a thin public surface once
+`scripts/deploy_fly.sh` runs with a Fly account (`flyctl` in `PATH`; `FLY_API_TOKEN` set). It
+reuses the real policy layer (`agent.refuse.authorize`, `agent.catalog`) so the refusal behaviour is
+identical to the production path — only the data source changes. The demo is not a replacement for
+the local docker-compose environment; it is an illustration of what that environment enforces, using
+fixture rows from `mcp/src/fixtures.ts` (site performance, film attendance) and `mcp/src/tools.ts`
+(sessions).
 
 Concrete choices:
 

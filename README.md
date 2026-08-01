@@ -344,7 +344,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
-| public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 13/13 sections pass |
+| public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -516,23 +516,40 @@ tests/                     30 tests; all HTTP mocked, no live API calls
 
 ## Poke it from your phone
 
-The bearer-scoped tool surface is deployed as a read-only fixture demo on Fly.io.
-Token `cinema-ops-demo-2026-08-01` is scoped to two sites (1 and 2), three tools, and expires 2026-08-31.
+The bearer-scoped tool surface can be run locally (stdlib only, no Postgres) and deployed to Fly.io
+as a read-only fixture demo once `scripts/deploy_fly.sh` runs with a Fly account.
+Token `cinema-ops-demo-2026-08-01` is scoped to two sites (1 and 2), three tools, and expires
+2026-08-31. The token is safe to publish: scoping is enforced server-side and the surface only ever
+reaches fixture rows — safety is scope, not secrecy.
+
+**Run locally first:**
+
+```bash
+PYTHONPATH=src python3 -m agent.demo_server --host 127.0.0.1 --port 8080
+```
 
 ```bash
 # List sessions — scoped bearer returns rows, dataset=fixture
 curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
-  https://cinema-ops-platform-demo.fly.dev/tools/list_sessions | python3 -m json.tool
+  http://127.0.0.1:8080/tools/list_sessions | python3 -m json.tool
 
 # No bearer → 401 missing_bearer_token
-curl -s https://cinema-ops-platform-demo.fly.dev/tools/list_sessions | python3 -m json.tool
+curl -s http://127.0.0.1:8080/tools/list_sessions | python3 -m json.tool
 
 # Out-of-scope site 3 → 403 site_scope (token is scoped to sites 1–2)
 curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
-  "https://cinema-ops-platform-demo.fly.dev/tools/list_sessions?siteIds=3" | python3 -m json.tool
+  "http://127.0.0.1:8080/tools/list_sessions?siteIds=3" | python3 -m json.tool
 
-# Tool manifest — no bearer needed for schema
-curl -s https://cinema-ops-platform-demo.fly.dev/tools | python3 -m json.tool
+# Tool manifest — bearer required
+curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
+  http://127.0.0.1:8080/tools | python3 -m json.tool
+```
+
+**After `scripts/deploy_fly.sh` runs with a Fly account** (not yet deployed — `deploy_fly.sh` exits 2
+without `flyctl` in `PATH`), the same curls point at:
+
+```
+https://cinema-ops-platform-demo.fly.dev/tools/list_sessions
 ```
 
 Every response carries `X-Cinema-Ops-Dataset: fixture` and `"dataset":"fixture"` — the demo cannot
