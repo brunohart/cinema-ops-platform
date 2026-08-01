@@ -11,6 +11,7 @@ services:
       - "${DB_HOST_PORT:-5432}:5432"
     volumes:
       - ./sql/init/001_schemas.sql:/docker-entrypoint-initdb.d/001_schemas.sql:ro
+      - ./sql/init/002_extractor_role.sql:/docker-entrypoint-initdb.d/005_extractor_role.sql:ro
       - ./sql/bronze/001_quarantine.sql:/docker-entrypoint-initdb.d/010_quarantine.sql:ro
       - ./sql/bronze/002_quarantine_grants.sql:/docker-entrypoint-initdb.d/011_quarantine_grants.sql:ro
       - ./sql/001_bronze.sql:/docker-entrypoint-initdb.d/020_landing.sql:ro
@@ -44,7 +45,11 @@ services:
       - ./sql/init/005_api_role.sql:/docker-entrypoint-initdb.d/055_api_role.sql:ro
       # 060: demo bronze seed so dagster cinema_ops_transform produces fct_booking rows.
       - ./sql/seed/001_demo_bronze.sql:/docker-entrypoint-initdb.d/060_demo_bronze.sql:ro
-
+      # VDE-52 — transformer (bronze read / silver+gold write) then api extensions
+      # (dim_customer column grants + FOR ROLE transformer default-privilege revokes).
+      # Numbered after 060 so they do not collide with the demo seed mount.
+      - ./sql/init/007_transformer_role.sql:/docker-entrypoint-initdb.d/061_transformer_role.sql:ro
+      - ./sql/init/008_api_role.sql:/docker-entrypoint-initdb.d/062_api_role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s

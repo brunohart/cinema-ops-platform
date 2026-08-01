@@ -148,6 +148,7 @@ pytest -q                       # the whole suite
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
+| three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
 
 > [!WARNING]
@@ -423,6 +424,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
 | — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
 | [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
+| [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 | [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
 

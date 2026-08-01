@@ -2,7 +2,7 @@
 
 **Status:** living record. One ADR per real choice, written at the moment the choice was made.
 **Started:** 2026-07-30
-**Last revised:** 2026-07-31 (ADR-013)
+**Last revised:** 2026-08-01 (ADR-016)
 **Companion to:** `ARCHITECTURE.md` — that file states what the system is, this one states why it is
 that and not something else.
 
@@ -529,5 +529,69 @@ redeploy, which is the correct forcing function — it is not a secret managed o
 makes the demo misleading rather than illustrative — at that point the demo either needs real data
 (requiring auth and Postgres) or it needs to be retired. Or if the Fly app accumulates unreviewed
 traffic, which would be a signal the demo has become a dependency rather than an illustration.
+
+---
+
+## ADR-016 — Three least-privilege roles on the write path, and grants enumerated rather than defaulted
+
+**Status** Accepted · 2026-08-01
+
+**Context** The platform's data flows through three distinct layers: raw evidence in bronze
+(append-only, VDE-11), typed and deduped silver + star-schema gold (dbt-managed), and a
+serving surface for the agent tools. Before this ADR, one Postgres role (`cinema`) was the
+owner of all three layers. A bug anywhere on the write path could reach everywhere.
+ADR-002 made Postgres the enforcement substrate because `GRANT SELECT (column, …)` is a
+structural control that a filter is not. This ADR applies that same principle to the write
+path, not just the read path.
+
+The agent path already has enumerated per-table grants (`agent`, `agent_reader` — VDE-42/48).
+VDE-38 already introduced a read-only `api` role (`sql/init/005_api_role.sql`) for the Hono
+agent-api. This ADR completes the write-path counterparts — `extractor`, `transformer`, and
+the `api` extensions in `008_api_role.sql` (column-scoped `dim_customer`, default-privilege
+revokes for the transformer owner). (Numbered ADR-016 because ADR-015 was already taken on
+`main` by VDE-54's public demo before this branch merged.)
+
+**Decision** Three roles, three schemas, three blast radii.
+
+- `extractor` — INSERT into bronze. Explicitly `REVOKE UPDATE, DELETE, TRUNCATE`.
+  A bug in the extractor cannot rewrite history.
+- `transformer` — SELECT bronze (read-only), ALL on silver and gold (dbt's execution role).
+  A bug in dbt cannot corrupt bronze.
+- `api` — SELECT on enumerated gold tables; column-scoped `SELECT (customer_key,
+  signup_date)` on `dim_customer`. A compromised serving credential cannot write anything
+  and cannot read a name. The grant list is enumerated per-table rather than using
+  `GRANT SELECT ON ALL TABLES IN SCHEMA gold`, because that statement would hand `api` every
+  PII column on `dim_customer` the moment it appeared. Same reason `agent` holds no grant
+  on `dim_customer.customer_email` (ADR-002 / CLAUDE.md).
+
+`agent` and `agent_reader` are deliberately **not members of `api`**. Role membership in
+Postgres is transitive and inherited: if either were a member of `api`, any future broad
+grant on `api` would propagate to the agent path silently, which is the thing ADR-009
+exists to prevent.
+
+No `ALTER DEFAULT PRIVILEGES … GRANT SELECT … TO api` is issued. A default privilege would
+grant `api` full-row access to the next PII-bearing gold table the moment it is created.
+Failing closed — new gold tables are invisible to `api` until `008_api_role.sql` is re-run —
+is the right direction. This gap is recorded in ARCHITECTURE §2b.
+
+**Consequences** Three role files, three proof surface areas. The `transformer` role also
+receives `GRANT CREATE ON DATABASE` because dbt's `--store-failures` materialisation
+creates schemas (`silver_dbt_test__audit`, `gold_dbt_test__audit`) and requires it.
+Ownership handover for pre-existing gold tables is wrapped in an exception handler so it
+degrades to `NOTICE` rather than aborting compose init. The per-table enumeration on `api`
+means a new gold table is invisible to `api` until `008` is re-run; the documentation for
+this gap is the cost. Compose mounts both `005_api_role.sql` (VDE-38 allow-list) and
+`008_api_role.sql` (VDE-52 extensions); both are idempotent and the later file adds the
+column-scoped `dim_customer` grant and the `FOR ROLE transformer` default-privilege revokes.
+
+`dbt build --target transformer` is the runnable path for executing dbt as the `transformer`
+role. The default dbt target remains `local` (the `cinema` owner DSN) so existing prove
+scripts are unaffected.
+
+**What would change my mind** A gold schema that changes shape often enough that the manual
+re-grant becomes the outage — at which point the event trigger in ARCHITECTURE §2b (a
+`CREATE TABLE` trigger with a PII-column denylist) is cheaper than the discipline. Or a
+Postgres version that makes enumerated column grants as expressive as table-level defaults,
+so the column-scope on `dim_customer` is not the only way to express PII absence.
 
 ---
