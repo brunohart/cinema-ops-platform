@@ -53,9 +53,10 @@ def read_state(session: str) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
 def write_state(session: str, state: dict[str, Any]) -> None:
@@ -88,14 +89,9 @@ def append_command(phase: str, session: str) -> str:
     )
 
 
-def missing_phases(session: str) -> list[str]:
-    entries, _ = ledger.load_entries(ledger.ledger_path(ROOT))
-    return ledger.check_session(entries, session)
-
-
 def phase_recorded(session: str, phase: str) -> bool:
     entries, _ = ledger.load_entries(ledger.ledger_path(ROOT))
-    return any(e.get("session") == session and e.get("phase") in (phase, "exempt") for e in entries)
+    return bool({phase, "exempt"} & ledger.recorded_phases(entries, session))
 
 
 def git(*args: str) -> str:
@@ -109,7 +105,7 @@ def git(*args: str) -> str:
 
 
 def record_baseline(state: dict[str, Any]) -> None:
-    """Where the repository stood when this run's first hook fired."""
+    """Where the repository stood when this run's first hook fired. `branch` is for diagnosis."""
     if "baseline" not in state:
         state["baseline"] = {
             "head": git("rev-parse", "HEAD"),
@@ -117,28 +113,41 @@ def record_baseline(state: dict[str, Any]) -> None:
         }
 
 
-def run_changed_the_repo(state: dict[str, Any]) -> bool:
-    """A run with no diff and no new commit was a question, not an issue.
+def git_ok(*args: str) -> bool:
+    try:
+        return (
+            subprocess.run(
+                ["git", *args], cwd=ROOT, capture_output=True, timeout=10, check=False
+            ).returncode
+            == 0
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
 
-    HEAD is compared against this run's own baseline rather than against the upstream branch: a run
-    that commits *and pushes* leaves a clean tree with nothing ahead of upstream, and that is how
-    cloud agents finish. Without the baseline, the most common way of doing real work would be the
-    one way to escape recording it.
+
+def run_changed_the_repo(state: dict[str, Any]) -> bool:
+    """Did *this run* change the repository? A run that changed nothing was a question.
+
+    Compared against a baseline the run recorded at its own first hook, never against upstream or
+    origin/main: those describe what earlier runs left on the branch, so they let a run that commits
+    and pushes finish silently while nagging a run that touched nothing.
+
+    A moved HEAD only counts as authorship when the baseline commit is an ancestor of it — commits
+    were added on top of where we started. Landing somewhere else entirely (`git checkout main`) is
+    movement, not work. With no baseline at all, the answer is no: authoring requires a tool call,
+    a tool call takes the baseline before it runs, and uncommitted work is caught above regardless.
     """
     if git("status", "--porcelain"):
         return True
 
-    baseline = state.get("baseline") or {}
-    head = git("rev-parse", "HEAD")
-    if baseline.get("head"):
-        return bool(head) and head != baseline["head"]
+    baseline = state.get("baseline")
+    if not isinstance(baseline, dict) or not baseline.get("head"):
+        return False
 
-    # No baseline (no hook fired early enough): fall back to what the branch itself shows.
-    for base in ("@{upstream}", "origin/main"):
-        count = git("rev-list", "--count", f"{base}..HEAD")
-        if count.isdigit():
-            return int(count) > 0
-    return False
+    head = git("rev-parse", "HEAD")
+    if not head or head == baseline["head"]:
+        return False
+    return git_ok("merge-base", "--is-ancestor", str(baseline["head"]), head)
 
 
 def protocol_brief(session: str) -> str:
@@ -179,10 +188,6 @@ def handle_pre_tool(data: dict[str, Any]) -> None:
     # No `permission` key: this hook exists to carry context, never to widen what is allowed.
     response: dict[str, Any] = {}
 
-    if not state.get("briefed"):
-        state["briefed"] = True
-        response["agent_message"] = protocol_brief(session)
-
     if tool == "Task":
         tool_input = data.get("tool_input")
         if isinstance(tool_input, dict):
@@ -210,6 +215,30 @@ def handle_pre_tool(data: dict[str, Any]) -> None:
 
     write_state(session, state)
     emit(response)
+
+
+# ---------------------------------------------------------------------------
+# postToolUse — brief the run once, through the channel documented for context
+# ---------------------------------------------------------------------------
+
+
+def handle_post_tool(data: dict[str, Any]) -> None:
+    """`additional_context` is the documented way to put text in front of a running agent.
+
+    `preToolUse`'s `agent_message` is documented as the message shown when an action is *denied*,
+    and denying is off the table for a hook that fires on every tool call — so the brief lives here.
+    """
+    session = str(data.get("conversation_id") or "unknown")
+    state = read_state(session)
+    record_baseline(state)
+    if state.get("briefed"):
+        write_state(session, state)
+        emit({})
+        return
+
+    state["briefed"] = True
+    write_state(session, state)
+    emit({"additional_context": protocol_brief(session)})
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +310,7 @@ def handle_subagent_stop(data: dict[str, Any]) -> None:
     phase = ledger.SUBAGENT_PHASES.get(subagent)
     status = str(data.get("status") or "")
 
-    if OFF or not phase or status != "completed" or phase_recorded(session, phase):
+    if not phase or status != "completed" or phase_recorded(session, phase):
         emit({})
         return
 
@@ -305,19 +334,45 @@ def handle_subagent_stop(data: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def unattested_phases(
+    entries: list[dict[str, Any]], session: str, state: dict[str, Any], recorded: set[str]
+) -> list[str]:
+    """Phases recorded in the ledger that no subagent of that phase ever started.
+
+    The ledger records claims; `subagentStart` records events. Where they disagree the run has
+    to say why, in a `note` naming the phase — a note about something else does not excuse it.
+    `plan` is not checked: the protocol lets a parent already on Opus plan in place.
+    """
+    started = state.get("phases") if isinstance(state.get("phases"), dict) else {}
+    excused = " ".join(
+        str(e.get("summary", "")).lower()
+        for e in entries
+        if e.get("session") == session and e.get("phase") == "note"
+    )
+    return [
+        phase
+        for phase in ("implement", "verify")
+        if phase in recorded and phase not in started and phase not in excused
+    ]
+
+
 def handle_stop(data: dict[str, Any]) -> None:
     session = str(data.get("conversation_id") or "unknown")
-    if OFF or str(data.get("status")) != "completed":
+    if str(data.get("status")) != "completed":
         emit({})
         return
-    if not run_changed_the_repo(read_state(session)):
+    state = read_state(session)
+    if not run_changed_the_repo(state):
         emit({})
         return
 
     entries, problems = ledger.load_entries(ledger.ledger_path(ROOT))
     problems += ledger.validate_entries(entries)
-    missing = ledger.check_session(entries, session)
-    if not missing and not problems:
+    recorded = ledger.recorded_phases(entries, session)
+    # A run that changed the repository cannot buy silence with an `exempt` entry.
+    missing = ledger.check_session(entries, session, allow_exempt=False)
+    unattested = unattested_phases(entries, session, state, recorded) if not missing else []
+    if not missing and not problems and not unattested:
         emit({})
         return
 
@@ -336,9 +391,25 @@ def handle_stop(data: dict[str, Any]) -> None:
         )
         lines += [f"  {append_command(phase, session)}" for phase in missing]
         lines.append(
-            "If this run genuinely did not need the pipeline, say so on the record instead: "
-            f"`python3 scripts/agent_ledger.py append --phase exempt --model <you> "
-            f'--session {session} --summary "<why the pipeline did not apply>" --allow-no-lesson`.'
+            "An `exempt` entry does not close a run that changed the repository — it is for runs "
+            "that changed nothing. Record the phases."
+        )
+    if unattested:
+        joined = ", ".join(f"`{phase}`" for phase in unattested)
+        lines.append(
+            f"pipeline: the ledger records {joined} for this run, but no subagent of that phase "
+            "ever started — so the entry is a claim, not an event. Either delegate the phase "
+            f"properly (`{'`, `'.join(ledger.PHASE_SUBAGENTS[p] for p in unattested)}`), or record "
+            "why it could not be delegated:"
+        )
+        lines.append(
+            f"  python3 scripts/agent_ledger.py append --phase note "
+            f"--model <the model that ran it> --session {session} "
+            f'--summary "<name the phase, and why it was not delegated>" '
+            f'--lesson "<what would let the next run delegate it>"'
+        )
+        lines.append(
+            "The note has to name the phase: a note about something else does not excuse it."
         )
     emit({"followup_message": "\n".join(lines)})
 
@@ -349,6 +420,7 @@ def handle_stop(data: dict[str, Any]) -> None:
 
 HANDLERS = {
     "pre-tool": handle_pre_tool,
+    "post-tool": handle_post_tool,
     "subagent-start": handle_subagent_start,
     "subagent-stop": handle_subagent_stop,
     "stop": handle_stop,
@@ -359,6 +431,10 @@ def main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] not in HANDLERS:
         print(f"usage: pipeline_hook.py {{{'|'.join(HANDLERS)}}}", file=sys.stderr)
         return 2
+    if OFF:
+        # One switch, honoured by every event: half a switch is worse than none.
+        emit({})
+        return 0
     try:
         raw = sys.stdin.read()
         data = json.loads(raw) if raw.strip() else {}

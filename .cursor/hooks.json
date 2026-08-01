@@ -8,6 +8,13 @@
         "failClosed": false
       }
     ],
+    "postToolUse": [
+      {
+        "command": "python3 .cursor/hooks/pipeline_hook.py post-tool",
+        "timeout": 20,
+        "failClosed": false
+      }
+    ],
     "subagentStart": [
       {
         "command": "python3 .cursor/hooks/pipeline_hook.py subagent-start",
