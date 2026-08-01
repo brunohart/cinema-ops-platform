@@ -3,7 +3,8 @@
 Stdlib only. No DB driver, no pydantic. All data is anchored to 2026-07-10.
 Token digests are pre-computed; override via AGENT_DEMO_TOKEN_SHA256.
 
-Fixture rows match mcp/src/fixtures.ts exactly.
+Session rows match mcp/src/tools.ts; site_performance and film_attendance
+rows match mcp/src/fixtures.ts.
 """
 
 from __future__ import annotations
@@ -101,7 +102,7 @@ SESSIONS_BY_SITE: dict[int, list[dict[str, Any]]] = {
             "session_id": 1002,
             "site_id": 2,
             "film_id": 202,
-            "starts_at": f"{ANCHOR_DATE}T20:00:00Z",
+            "starts_at": f"{ANCHOR_DATE}T20:15:00+00:00",
         }
     ],
     3: [],
