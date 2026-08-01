@@ -56,14 +56,22 @@ FACT_DIMENSION_FKS: dict[str, list[tuple[str, str, str]]] = {
         ("cinema_key", "dim_cinema", "cinema_key"),
         ("date_key", "dim_date", "date_key"),
     ],
+    # dbt gold fact (VDE-29) — site_key is the conformed cinema dimension.
+    "fct_session": [
+        ("film_key", "dim_film", "film_key"),
+        ("site_key", "dim_site", "site_key"),
+        ("date_key", "dim_date", "date_key"),
+    ],
 }
 
 GOLD_TABLES_WITH_ROW_COUNT = (
     "fct_ticket_sale",
     "fct_booking",
     "fct_showtime_performance",
+    "fct_session",
     "dim_film",
     "dim_cinema",
+    "dim_site",
     "dim_date",
 )
 
@@ -371,6 +379,38 @@ def dim_date_row_count_delta(
     )
 
 
+@asset_check(
+    asset=AssetKey(["gold", "dim_site"]),
+    name="row_count_delta",
+    description=(
+        "Row-count delta vs previous materialisation. Fails outside ±20% "
+        "(WARN — Model 11 distribution signal, not a fault)."
+    ),
+)
+def dim_site_row_count_delta(
+    context: AssetCheckExecutionContext, pipeline_config: PipelineConfig
+) -> AssetCheckResult:
+    return _row_count_delta_result(
+        context=context, pipeline_config=pipeline_config, table="dim_site"
+    )
+
+
+@asset_check(
+    asset=AssetKey(["gold", "fct_session"]),
+    name="row_count_delta",
+    description=(
+        "Row-count delta vs previous materialisation. Fails outside ±20% "
+        "(WARN — Model 11 distribution signal, not a fault)."
+    ),
+)
+def fct_session_row_count_delta(
+    context: AssetCheckExecutionContext, pipeline_config: PipelineConfig
+) -> AssetCheckResult:
+    return _row_count_delta_result(
+        context=context, pipeline_config=pipeline_config, table="fct_session"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Null-rate — §5c C2 required fields (ERROR) — VDE-31
 # ---------------------------------------------------------------------------
@@ -424,6 +464,22 @@ def fct_showtime_performance_referential_integrity(
 ) -> AssetCheckResult:
     return _referential_integrity_result(
         pipeline_config=pipeline_config, table="fct_showtime_performance"
+    )
+
+
+@asset_check(
+    asset=AssetKey(["gold", "fct_session"]),
+    name="referential_integrity",
+    description=(
+        "Orphan fact keys vs dim_film / dim_site / dim_date must be 0 "
+        "(ARCHITECTURE §5c C1). Severity ERROR — integrity."
+    ),
+)
+def fct_session_referential_integrity(
+    pipeline_config: PipelineConfig,
+) -> AssetCheckResult:
+    return _referential_integrity_result(
+        pipeline_config=pipeline_config, table="fct_session"
     )
 
 
@@ -503,11 +559,8 @@ FRESHNESS_CHECKS = [
         lower_bound_delta=timedelta(hours=24),
         severity=AssetCheckSeverity.WARN,
     ),
-    *build_last_update_freshness_checks(
-        assets=[AssetKey(["gold", "fct_ticket_sale"])],
-        lower_bound_delta=timedelta(hours=3),
-        severity=AssetCheckSeverity.WARN,
-    ),
+    # Headline ≤ 3h promise (ARCHITECTURE §5a named this fct_ticket_sale; the
+    # executable gold fact today is fct_booking — VDE-29 dbt assets).
     *build_last_update_freshness_checks(
         assets=[AssetKey(["gold", "fct_booking"])],
         lower_bound_delta=timedelta(hours=3),
@@ -525,12 +578,15 @@ ALL_ASSET_CHECKS = [
     fct_ticket_sale_row_count_delta,
     fct_booking_row_count_delta,
     fct_showtime_performance_row_count_delta,
+    fct_session_row_count_delta,
     dim_film_row_count_delta,
     dim_cinema_row_count_delta,
+    dim_site_row_count_delta,
     dim_date_row_count_delta,
     fct_ticket_sale_null_rate,
     fct_ticket_sale_referential_integrity,
     fct_showtime_performance_referential_integrity,
+    fct_session_referential_integrity,
 ]
 
 CORRECTNESS_CHECKS = [orphan_film_keys]

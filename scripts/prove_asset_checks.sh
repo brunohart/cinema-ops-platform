@@ -60,7 +60,11 @@ assert NULL_RATE_THRESHOLDS["fct_ticket_sale"] == {
     "cinema_id": 0.0,
     "occurred_at": 0.0,
 }
-assert set(FACT_DIMENSION_FKS) == {"fct_ticket_sale", "fct_showtime_performance"}
+assert set(FACT_DIMENSION_FKS) == {
+    "fct_ticket_sale",
+    "fct_showtime_performance",
+    "fct_session",
+}
 
 repo = defs.get_repository_def()
 check_keys = sorted(
@@ -78,9 +82,12 @@ required = {
     ("gold/fct_ticket_sale", "referential_integrity"),
     ("gold/fct_showtime_performance", "row_count_delta"),
     ("gold/fct_showtime_performance", "referential_integrity"),
+    ("gold/fct_session", "row_count_delta"),
+    ("gold/fct_session", "referential_integrity"),
     ("gold/fct_booking", "row_count_delta"),
     ("gold/dim_film", "row_count_delta"),
     ("gold/dim_cinema", "row_count_delta"),
+    ("gold/dim_site", "row_count_delta"),
     ("gold/dim_date", "row_count_delta"),
 }
 missing = required - set(check_keys)

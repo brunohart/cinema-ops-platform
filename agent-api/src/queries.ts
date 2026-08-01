@@ -10,6 +10,11 @@ import { z } from "zod";
  * Column names follow gold as materialised today:
  *   booking_total → rev, ticket_count → admits, site_code (not site_id).
  * date_key is YYYYMMDD int; the binder converts ISO dates before bind.
+ *
+ * VDE-42 — personal columns are not masked here; they are not selected.
+ * Storage may still hold them on gold.dim_customer for fulfilment. This
+ * allowlist never names those columns, so no code path can emit them.
+ * Issue-shaped proof: scripts/prove_pii_absent.sh (must score zero hits).
  */
 export const QUERIES = {
   site_performance: {
