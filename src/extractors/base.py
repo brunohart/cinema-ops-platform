@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import random
 import time
 import uuid
@@ -20,7 +19,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
-logger = logging.getLogger(__name__)
+from logging_config import bind_run_context, clear_run_context, get_logger
+
+logger = get_logger(__name__)
 
 # Bronze contract (CLAUDE.md layer rules) — every landed row carries these four.
 BRONZE_METADATA_COLUMNS = (
@@ -136,6 +137,7 @@ class BaseExtractor(ABC):
         clock: Callable[[], datetime] | None = None,
         rng: random.Random | None = None,
         batch_id_factory: Callable[[], str] | None = None,
+        asset_key: str | None = None,
     ) -> None:
         self.source = source
         self.state_store = state_store
@@ -148,6 +150,9 @@ class BaseExtractor(ABC):
         self._clock = clock or (lambda: datetime.now(UTC))
         self._rng = rng or random.Random()
         self._batch_id_factory = batch_id_factory or (lambda: str(uuid.uuid4()))
+        # Dagster asset key when known; otherwise a stable bronze-shaped default
+        # so every CLI run still greps on one field (VDE-34).
+        self.asset_key = asset_key or f"bronze/raw_{source}"
 
     @property
     def source_name(self) -> str:
@@ -192,44 +197,72 @@ class BaseExtractor(ABC):
 
         Order is load-bearing. The new watermark is written last, after a successful
         bronze merge, so a crash mid-run re-fetches rather than skipping data.
+
+        ``batch_id`` / ``source`` / ``asset_key`` are bound into the log context at
+        the start of the run so every stage-boundary line carries them (VDE-34).
         """
         started_at = self._clock()
-        watermark = self.state_store.read_watermark(self.source)
-        rows, new_watermark = self._fetch_with_retry(watermark)
-
         batch_id = self._batch_id_factory()
-        stamped = [self.stamp(row, batch_id) for row in rows]
+        bind_run_context(
+            batch_id=batch_id,
+            source=self.source,
+            asset_key=self.asset_key,
+        )
+        try:
+            logger.info("run.start")
+            logger.info("extract.start")
+            watermark = self.state_store.read_watermark(self.source)
+            rows, new_watermark = self._fetch_with_retry(watermark)
+            logger.info("extract.end", row_count=len(rows))
 
-        accepted, rejected = self._partition_by_validation(stamped)
-        if rejected:
-            self.quarantine_store.write(rejected)
+            stamped = [self.stamp(row, batch_id) for row in rows]
 
-        merged = 0
-        if accepted:
-            merged = self.bronze_store.merge(accepted, key=BRONZE_MERGE_KEY)
+            accepted, rejected = self._partition_by_validation(stamped)
+            logger.info(
+                "validation.end",
+                accepted=len(accepted),
+                rejected=len(rejected),
+            )
+            if rejected:
+                self.quarantine_store.write(rejected)
 
-        # Watermark AFTER a successful write, never before.
-        self.state_store.write_watermark(self.source, new_watermark)
+            merged = 0
+            if accepted:
+                merged = self.bronze_store.merge(accepted, key=BRONZE_MERGE_KEY)
+            logger.info("merge.end", merged=merged, quarantined=len(rejected))
 
-        finished_at = self._clock()
-        if self.pipeline_run_store is not None:
-            self.pipeline_run_store.record(
-                source=self.source,
-                batch_id=batch_id,
+            # Watermark AFTER a successful write, never before.
+            self.state_store.write_watermark(self.source, new_watermark)
+
+            finished_at = self._clock()
+            if self.pipeline_run_store is not None:
+                self.pipeline_run_store.record(
+                    source=self.source,
+                    batch_id=batch_id,
+                    fetched=len(rows),
+                    merged=merged,
+                    quarantined=len(rejected),
+                    started_at=started_at,
+                    finished_at=finished_at,
+                )
+
+            result = ExtractorResult(
                 fetched=len(rows),
                 merged=merged,
                 quarantined=len(rejected),
-                started_at=started_at,
-                finished_at=finished_at,
+                watermark=new_watermark,
+                batch_id=batch_id,
             )
-
-        return ExtractorResult(
-            fetched=len(rows),
-            merged=merged,
-            quarantined=len(rejected),
-            watermark=new_watermark,
-            batch_id=batch_id,
-        )
+            logger.info(
+                "run.end",
+                fetched=result.fetched,
+                merged=result.merged,
+                quarantined=result.quarantined,
+                watermark=str(result.watermark) if result.watermark is not None else None,
+            )
+            return result
+        finally:
+            clear_run_context()
 
     def _fetch_with_retry(self, watermark: Any) -> tuple[list[dict[str, Any]], Any]:
         """Retry ``fetch()`` only — exponential backoff with full jitter."""
@@ -245,12 +278,11 @@ class BaseExtractor(ABC):
                     break
                 delay = self._backoff_delay(attempt)
                 logger.warning(
-                    "fetch failed for source=%s attempt=%s/%s; retrying in %.3fs: %s",
-                    self.source,
-                    attempt,
-                    attempts,
-                    delay,
-                    exc,
+                    "extract.retry",
+                    attempt=attempt,
+                    max_attempts=attempts,
+                    delay_seconds=round(delay, 3),
+                    error=str(exc),
                 )
                 self._sleep(delay)
 
