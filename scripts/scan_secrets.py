@@ -64,7 +64,7 @@ TIER_A_PATTERNS: list[tuple[re.Pattern[str], str]] = [
 # ---------------------------------------------------------------------------
 
 TIER_B_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)\b"
+    r"(?i)(?<![A-Za-z0-9])[\"']?(api[_\-]?key|apikey|password|passwd|pwd|secret|token|webhook|bearer)\b[\"']?"
     r"\s*[:=]\s*(?P<value>\S.*)$"
 )
 
@@ -250,16 +250,42 @@ def _classify_tier_b(raw_value: str) -> str | None:
             return "blank"
         head = tokens[0]
 
-        # Strip trailing Python/shell string-closing delimiters and punctuation from the
-        # first token.  If any were present, the scanner is reading source-code (e.g. a
-        # Python list item `"KEY=VALUE",  # comment`).  Real API keys and tokens never
-        # end with `",' or equivalent closing syntax, so this is a safe value-shape check
-        # — not a path exclusion.
+        # Step 1: strip only trailing non-quote punctuation (commas, semis, brackets) to
+        # isolate the bare token without destroying quote balance information.
+        head_no_punc = head.rstrip(",;)]}")
+
+        # Step 2: balanced quoted literal — the token is a complete quoted string, e.g.
+        # "d4a9b1c3..." or 'd4a9b1c3...'.  This arises from real value assignments:
+        #   api_key = "value"  # comment
+        #   "api_key": "value",  # JSON
+        # The closing quote is the OPENER of the same string — not a fragment from a
+        # string that started before the key name.  Unwrap and entropy-test the inner
+        # value; do NOT return source-literal.
+        if (
+            len(head_no_punc) >= 2
+            and head_no_punc[0] in ('"', "'")
+            and head_no_punc[-1] == head_no_punc[0]
+        ):
+            inner = head_no_punc[1:-1]
+            if not inner:
+                return "low-entropy"
+            if inner[0] in ("$", "%", "{", "<", "«"):
+                return "interpolation"
+            if _PLACEHOLDER_RE.search(inner):
+                return "placeholder"
+            if len(inner) < 12 or _shannon(inner) < 3.0:
+                return "low-entropy"
+            return None  # high-entropy real credential — leave unaccounted
+
+        # Step 3: unbalanced closer — the token ends with a quote or bracket that has no
+        # matching opener inside the token.  The string started before the key name, e.g.
+        # a historical Python fixture line: `"KEY=VALUE",  # comment`.  Real API keys and
+        # tokens never end with an unmatched `"`, `'`, `)`, `]`, or `}` after stripping
+        # trailing punctuation, so this is a safe value-shape check — not a path exclusion.
         head_core = head.rstrip("'\"``,;)]}")
         if head_core != head:
             if not head_core:
                 return "low-entropy"
-            # Source-code context: classify head_core without the surrounding syntax.
             if _EXPR_RE.match(head_core) and not (
                 len(head_core) >= 20
                 and "_" not in head_core
@@ -510,12 +536,17 @@ def _run_self_check() -> None:
     _v_alpha = "abcdefghijklmnopqrstuvwxyz" + "012345"  # 32 chars, entropy 5.0
     _v_mixed = "SuperSecretValue99!"             # mixed-charset, entropy 3.4
     kill_lines: list[str] = [
-        # Trailing comment on this line proves the prose fix: the comment must NOT launder
-        # the credential as prose before entropy runs.
+        # Trailing comment proves the prose fix: comment must NOT launder the credential.
         "TMDB_API" + "_KEY=" + _v_hex + "  # deploy key",
         "AGENT_TOOL" + "_TOKEN=" + _v_alpha,
         "api" + "_key=" + _v_hex,
         "pass" + "word=" + _v_mixed,
+        # Balanced quoted literal with trailing comment — must NOT return source-literal.
+        # Shape: api_key = "value"  # comment
+        'api' + '_key = "' + _v_hex + '"  # prod key',
+        # JSON/YAML quoted-key shape — TIER_B_RE must match; balanced inner value is real.
+        # Shape: "api_key": "value",  # comment
+        '"api' + '_key": "' + _v_hex + '",  # prod',
     ]
 
     failures: list[str] = []
