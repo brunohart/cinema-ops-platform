@@ -259,5 +259,100 @@ def raw_ticketing(
     return MaterializeResult(metadata=_result_metadata(payload))
 
 
+# ---------------------------------------------------------------------------
+# Gold — platform-named facts/dims that dbt does not emit (VDE-26 / VDE-31).
+# dbt owns dim_film, dim_site, dim_date, fct_booking, fct_session (VDE-29).
+# These thin assets expose ARCHITECTURE §3a names for §5c asset checks without
+# colliding with dagster-dbt keys.
+# ---------------------------------------------------------------------------
+
+
+def _bootstrap_gold_sla(dsn: str) -> None:
+    """Grain tables + §5c columns/dims the asset checks join against."""
+    from stores.postgres import apply_schema_files
+
+    root = _repo_root()
+    apply_schema_files(
+        dsn,
+        str(root / "sql" / "gold" / "001_fact_grains.sql"),
+        str(root / "sql" / "gold" / "002_sla_check_columns.sql"),
+    )
+
+
+def _gold_row_count(dsn: str, table: str) -> int:
+    import psycopg
+
+    with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+        cur.execute(f"SELECT COUNT(*) FROM gold.{table}")  # noqa: S608 — caller allow-lists
+        return int(cur.fetchone()[0])
+
+
+def _gold_materialize(
+    context: AssetExecutionContext,
+    pipeline_config: PipelineConfig,
+    *,
+    table: str,
+    extra_metadata: dict[str, Any] | None = None,
+) -> MaterializeResult:
+    dsn = pipeline_config.dsn()
+    if not pipeline_config.skip_schema:
+        _bootstrap_gold_sla(dsn)
+    row_count = _gold_row_count(dsn, table)
+    meta: dict[str, Any] = {
+        "row_count": MetadataValue.int(row_count),
+        "owner": MetadataValue.text("platform"),
+        "gold_table": MetadataValue.text(f"gold.{table}"),
+    }
+    if extra_metadata:
+        meta.update(extra_metadata)
+    context.log.info("gold/%s row_count=%s", table, row_count)
+    return MaterializeResult(metadata=meta)
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One cinema site (ARCHITECTURE §3a dim_cinema). dbt emits dim_site; "
+        "this asset keeps the platform name for §5c checks (VDE-31)."
+    ),
+)
+def dim_cinema(
+    context: AssetExecutionContext, pipeline_config: PipelineConfig
+) -> MaterializeResult:
+    return _gold_materialize(context, pipeline_config, table="dim_cinema")
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One ticket sold — one seat, one showtime, one transaction line "
+        "(ARCHITECTURE §3a / VDE-26 grain). Asset checks: row-count Δ, "
+        "§5c C2 null-rate, §5c C1 RI."
+    ),
+)
+def fct_ticket_sale(
+    context: AssetExecutionContext, pipeline_config: PipelineConfig
+) -> MaterializeResult:
+    return _gold_materialize(context, pipeline_config, table="fct_ticket_sale")
+
+
+@asset(
+    key_prefix="gold",
+    description=(
+        "One showtime at one screen on one date, with its aggregate outcome "
+        "(ARCHITECTURE §3a). dbt emits fct_session; this keeps the platform "
+        "name for §5c RI checks (VDE-31)."
+    ),
+)
+def fct_showtime_performance(
+    context: AssetExecutionContext, pipeline_config: PipelineConfig
+) -> MaterializeResult:
+    return _gold_materialize(
+        context, pipeline_config, table="fct_showtime_performance"
+    )
+
+
 BRONZE_ASSETS = [raw_tmdb, raw_landing_files, raw_cinema_ops, raw_ticketing]
-ALL_ASSETS = BRONZE_ASSETS
+# Platform gold keys that are not produced by dagster-dbt (VDE-29).
+GOLD_PLATFORM_ASSETS = [dim_cinema, fct_ticket_sale, fct_showtime_performance]
+ALL_ASSETS = BRONZE_ASSETS + GOLD_PLATFORM_ASSETS
