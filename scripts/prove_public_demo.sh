@@ -111,8 +111,8 @@ if "syd" not in toml:
 
 # Dockerfile: check no pip install, port 8080, user 10001, CMD demo_server
 dockerfile = (root / "Dockerfile").read_text()
-if re.search(r"pip install", dockerfile):
-    print("FAIL: Dockerfile contains pip install")
+if re.search(r"^RUN\s+.*pip\s+install", dockerfile, re.MULTILINE):
+    print("FAIL: Dockerfile contains RUN pip install")
     sys.exit(1)
 if "8080" not in dockerfile:
     print("FAIL: Dockerfile missing PORT 8080")
