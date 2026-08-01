@@ -50,26 +50,36 @@ not application discipline. ADR-003 makes each layer's scope a schema boundary.
 docker compose up -d db && ./scripts/prove_least_privilege_roles.sh
 ```
 
-### Captured output (2026-08-01)
+### Captured output (2026-08-01, re-run after verifier fixes)
+
+Three fixes applied before this run:
+1. `bronze._vde52_grant_probe` created BEFORE roles so `GRANT … ON ALL TABLES` covers it.
+2. Transformer SELECT bronze uses `ON_ERROR_STOP=1` against the named probe (no fallback).
+3. Transformer INSERT bronze tested as INSERT-only in its own psql invocation (separate from CREATE).
+4. Grant matrix queried before probe cleanup — bronze rows now appear.
 
 ```
 ==> ensure Postgres is up
-==> apply schemas and gold tables (idempotent)
+==> apply schemas
 psql:sql/init/001_schemas.sql:4: NOTICE:  schema "bronze" already exists, skipping
 psql:sql/init/001_schemas.sql:5: NOTICE:  schema "silver" already exists, skipping
 psql:sql/init/001_schemas.sql:6: NOTICE:  schema "gold" already exists, skipping
 psql:sql/init/001_schemas.sql:7: NOTICE:  schema "meta" already exists, skipping
+==> create bronze grant probe (before roles so ON ALL TABLES covers it)
+==> apply extractor role (GRANT INSERT ON ALL TABLES now covers _vde52_grant_probe)
 psql:sql/init/002_extractor_role.sql:10: NOTICE:  schema "bronze" already exists, skipping
+==> apply gold tables (idempotent)
 psql:sql/gold/001_fact_grains.sql:5: NOTICE:  schema "gold" already exists, skipping
 psql:sql/gold/001_fact_grains.sql:18: NOTICE:  relation "fct_ticket_sale" already exists, skipping
 psql:sql/gold/001_fact_grains.sql:27: NOTICE:  relation "fct_booking" already exists, skipping
 psql:sql/gold/001_fact_grains.sql:41: NOTICE:  relation "fct_showtime_performance" already exists, skipping
 psql:sql/gold/003_dim_customer.sql:6: NOTICE:  schema "gold" already exists, skipping
 psql:sql/gold/003_dim_customer.sql:15: NOTICE:  relation "dim_customer" already exists, skipping
-==> apply transformer and api roles (idempotent)
+==> apply transformer role (GRANT SELECT ON ALL TABLES in bronze covers _vde52_grant_probe)
 psql:sql/init/007_transformer_role.sql:115: NOTICE:  role "cinema" has already been granted membership in role "transformer" by role "cinema"
+==> apply api role
 psql:sql/init/008_api_role.sql:93: NOTICE:  role "cinema" has already been granted membership in role "api" by role "cinema"
-==> set local dev passwords (LOGIN is not redundant — extractor may be NOLOGIN on cold compose)
+==> set local dev passwords (LOGIN flag ensures loginability on a cold compose)
 ==> run kill-test (SET ROLE path)
 CREATE TABLE
 GRANT
@@ -136,7 +146,7 @@ ERROR:  42501: permission denied for table dim_customer
 LOCATION:  aclcheck_error, aclchk.c:2812
   SQLSTATE 42501 confirmed for customer_email
 
-==> positive check: transformer SELECT bronze
+==> positive check: transformer SELECT bronze._vde52_grant_probe (ON_ERROR_STOP, no fallback)
  count
 -------
      0
@@ -144,9 +154,7 @@ LOCATION:  aclcheck_error, aclchk.c:2812
 
 
 ==> negative check: transformer INSERT bronze must fail with 42501
-ERROR:  42501: permission denied for schema bronze
-LINE 1: CREATE TABLE IF NOT EXISTS bronze._vde52_trans_probe(x int);...
-                                   ^
+ERROR:  42501: permission denied for table _vde52_grant_probe
 LOCATION:  aclcheck_error, aclchk.c:2812
   SQLSTATE 42501 confirmed for transformer INSERT bronze
 
@@ -160,12 +168,12 @@ INSERT 0 1
 
 DROP TABLE
 
-==> positive check: extractor INSERT bronze
+==> positive check: extractor INSERT bronze._vde52_grant_probe
 INSERT 0 1
   extractor INSERT bronze: OK
 
 ==> negative check: extractor UPDATE bronze must fail with 42501
-ERROR:  42501: permission denied for table _vde52_ext_probe
+ERROR:  42501: permission denied for table _vde52_grant_probe
 LOCATION:  aclcheck_error, aclchk.c:2812
   SQLSTATE 42501 confirmed for extractor UPDATE bronze
 
@@ -173,13 +181,16 @@ LOCATION:  aclcheck_error, aclchk.c:2812
   rows with film_key=99999: 0
   confirmed: 0 rows
 
-==> grant matrix
+==> grant matrix (bronze rows visible because probe existed when roles were applied)
    grantee   | table_schema |                          privs
 -------------+--------------+---------------------------------------------------------
  api         | gold         | SELECT
+ extractor   | bronze       | INSERT
+ transformer | bronze       | SELECT
  transformer | gold         | DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE
-(2 rows)
+(4 rows)
 
+  bronze grant rows confirmed (2 privilege rows)
 
 OK — VDE-52: extractor→bronze-insert-only, transformer→bronze-read+silver+gold-write, api→gold-read-only (no PII)
 ```
