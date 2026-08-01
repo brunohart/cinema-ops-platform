@@ -470,7 +470,11 @@ ARCHITECTURE.md            what the system is — living, revised, never tidied
 DECISIONS.md               ADR-001…011, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
 RUNBOOK.md                 three likely failures — symptom first, then what on-call does
-docker-compose.yml         Postgres 16, DDL applied at init — the reference environment
+Dockerfile                 multi-stage image: installs Python deps + dbt + dagster
+.dockerignore              keeps .git and local caches out of the build context
+docker-compose.yml         full stack: db + redpanda + seed (Dagster transform) +
+                           dagster :3000 + agent-tools :8787; VFS storage driver required
+                           in this container environment (see docs artefact VDE-49)
 
 src/
   extractors/base.py       the template method: run() is final, fetch() is yours
@@ -491,6 +495,7 @@ sql/
   init/004_kill_test_…     the kill test that proves the grant holds
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
+  seed/                    bronze seed rows loaded at initdb (bookings, films, etc.)
 
 dbt/
   models/bronze/           sources only — bronze stays DDL + extractors
@@ -498,7 +503,15 @@ dbt/
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
-scripts/                   the proof commands, one per claim
+scripts/
+  seed_platform.sh         runs inside the compose seed service: dagster job execute
+                           cinema_ops_transform → SEED OK (dagster path), then asserts
+                           fct_booking count > 0
+  prove_clean_clone.sh     end-to-end proof: git clone → cp .env.example .env →
+                           docker compose up → fct_booking_rows > 0 (grain-checked) →
+                           PROOF OK; also asserts seed log shows dagster path
+  (other scripts)          one proof command per claim
+
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
 ```
