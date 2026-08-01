@@ -419,10 +419,10 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
-| — | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
+| [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
 
-That last row is the only one with no issue id, and it stays visibly empty rather than being filled
-in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
+The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
+with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
 there was no issue to trace it to. The trail records the gap.
 
 ### How the work gets done — plan, implement, verify

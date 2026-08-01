@@ -108,8 +108,10 @@ Total: 6 module-level overrides. No wildcard `module = "*"` used.
 
 ## Actions URL
 
-_Pending: branch has not been pushed yet at time of writing. URL will be:_
-`https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml`
+_Pending: the specific Actions run URL will be filled in by the parent once the CI run triggered by
+[PR #44](https://github.com/brunohart/cinema-ops-platform/pull/44) completes. Do not invent a URL._
+
+Workflow page: `https://github.com/brunohart/cinema-ops-platform/actions/workflows/ci.yml`
 
 ---
 
