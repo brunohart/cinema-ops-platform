@@ -31,6 +31,11 @@ from typing import Any
 SCHEMA = 1
 LEDGER_RELPATH = "docs/agent-ledger/ledger.jsonl"
 
+# A lesson is one line of prose. It is injected into a later run's prompt, so it is collapsed to a
+# single line and capped: a multi-line lesson could otherwise forge headings and instructions inside
+# a subagent's prompt, and the ledger is written by agents.
+MAX_LESSON_CHARS = 300
+
 # The three phases every non-exempt run must record, in order.
 REQUIRED_PHASES: tuple[str, ...] = ("plan", "implement", "verify")
 # `exempt` closes a run that did not need the pipeline; `note` is for hook-written observations.
@@ -119,6 +124,26 @@ def load_entries(path: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return entries, problems
 
 
+def one_line(text: str, limit: int = MAX_LESSON_CHARS) -> str:
+    """Collapse to a single line and cap. Applied on the way in and again on the way out."""
+    collapsed = " ".join(str(text).split())
+    return collapsed[:limit].rstrip() + "…" if len(collapsed) > limit else collapsed
+
+
+def clean_lessons(lessons: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for lesson in lessons or []:
+        if not isinstance(lesson, dict) or not lesson.get("lesson"):
+            continue
+        entry: dict[str, Any] = {"lesson": one_line(lesson["lesson"])}
+        if lesson.get("tags"):
+            entry["tags"] = [one_line(tag, 32) for tag in lesson["tags"]]
+        if lesson.get("evidence"):
+            entry["evidence"] = one_line(lesson["evidence"])
+        cleaned.append(entry)
+    return cleaned
+
+
 def append_entry(
     *,
     phase: str,
@@ -134,41 +159,74 @@ def append_entry(
     root: Path | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Append one entry and return it. The only writer — opens the ledger in append mode only."""
+    """Append one entry and return it. The only writer — opens the ledger in append mode only.
+
+    Reading the previous hash and appending must not interleave with another writer, or two entries
+    claim the same `prev` and the chain for that session is broken for good — and the protocol
+    forbids the only repair. The whole read-then-append is therefore taken under an exclusive lock.
+    """
     if phase not in ALL_PHASES:
         raise ValueError(f"unknown phase {phase!r}; expected one of {', '.join(ALL_PHASES)}")
 
     path = ledger_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    existing, _ = load_entries(path)
-    prev = last_hash(existing, session)
 
-    entry: dict[str, Any] = {
-        "schema": SCHEMA,
-        "id": uuid.uuid4().hex[:12],
-        "recorded_at": (now or datetime.now(UTC)).isoformat(timespec="seconds"),
-        "session": session,
-        "phase": phase,
-        "model": model,
-        "source": source,
-        "summary": summary.strip(),
-    }
-    if issue:
-        entry["issue"] = issue
-    if branch:
-        entry["branch"] = branch
-    if verdict:
-        entry["verdict"] = verdict
-    if lessons:
-        entry["lessons"] = lessons
-    if artefacts:
-        entry["artefacts"] = artefacts
-    entry["prev"] = prev
-    entry["hash"] = compute_hash(entry, prev)
+    with path.open("a+", encoding="utf-8") as handle:
+        with _locked(handle):
+            existing, _ = load_entries(path)
+            prev = last_hash(existing, session)
 
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(canonical(entry) + "\n")
+            entry: dict[str, Any] = {
+                "schema": SCHEMA,
+                "id": uuid.uuid4().hex[:12],
+                "recorded_at": (now or datetime.now(UTC)).isoformat(timespec="seconds"),
+                "session": session,
+                "phase": phase,
+                "model": one_line(model, 64),
+                "source": source,
+                "summary": one_line(summary, 400),
+            }
+            if issue:
+                entry["issue"] = one_line(issue, 32)
+            if branch:
+                entry["branch"] = one_line(branch, 200)
+            if verdict:
+                entry["verdict"] = verdict
+            cleaned = clean_lessons(lessons)
+            if cleaned:
+                entry["lessons"] = cleaned
+            if artefacts:
+                entry["artefacts"] = [one_line(a, 200) for a in artefacts]
+            entry["prev"] = prev
+            entry["hash"] = compute_hash(entry, prev)
+
+            handle.write(canonical(entry) + "\n")
+            handle.flush()
     return entry
+
+
+class _locked:
+    """Exclusive advisory lock on an open file, where the platform has one."""
+
+    def __init__(self, handle: Any) -> None:
+        self.handle = handle
+        self.fcntl: Any = None
+
+    def __enter__(self) -> None:
+        try:
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX)
+            self.fcntl = fcntl
+        except (ImportError, OSError):
+            self.fcntl = None  # no flock here; appends stay atomic, the chain is best-effort
+
+    def __exit__(self, *exc: Any) -> None:
+        if self.fcntl is not None:
+            try:
+                self.fcntl.flock(self.handle.fileno(), self.fcntl.LOCK_UN)
+            except OSError:
+                pass
 
 
 def last_hash(entries: list[dict[str, Any]], session: str) -> str:
@@ -215,14 +273,25 @@ def validate_entries(entries: list[dict[str, Any]]) -> list[str]:
     return problems
 
 
+def recorded_phases(entries: list[dict[str, Any]], session: str) -> set[str]:
+    return {str(e.get("phase")) for e in entries if e.get("session") == session}
+
+
 def check_session(
     entries: list[dict[str, Any]],
     session: str,
     required: tuple[str, ...] = REQUIRED_PHASES,
+    *,
+    allow_exempt: bool = True,
 ) -> list[str]:
-    """Phases this session still owes. Empty list means the run may finish."""
-    recorded = {str(e.get("phase")) for e in entries if e.get("session") == session}
-    if "exempt" in recorded:
+    """Phases this session still owes. Empty list means the run may finish.
+
+    `allow_exempt` is false where the run is known to have changed the repository: claiming an
+    exemption for work that landed is the one thing the protocol calls dishonest, so the entry
+    must not be able to buy silence there.
+    """
+    recorded = recorded_phases(entries, session)
+    if allow_exempt and "exempt" in recorded:
         return []
     return [phase for phase in required if phase not in recorded]
 
@@ -242,11 +311,13 @@ def lesson_records(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for lesson in entry.get("lessons") or []:
             if not isinstance(lesson, dict) or not lesson.get("lesson"):
                 continue
+            # Sanitised again on read: entries written before this rule, or by hand, are also
+            # injected into prompts, and one line is one line whatever wrote it.
             records.append(
                 {
-                    "lesson": str(lesson["lesson"]).strip(),
-                    "tags": [str(t) for t in lesson.get("tags") or []],
-                    "evidence": str(lesson.get("evidence") or ""),
+                    "lesson": one_line(lesson["lesson"]),
+                    "tags": [one_line(str(t), 32) for t in lesson.get("tags") or []],
+                    "evidence": one_line(lesson.get("evidence") or ""),
                     "phase": str(entry.get("phase", "")),
                     "issue": str(entry.get("issue") or ""),
                     "date": str(entry.get("recorded_at", ""))[:10],
