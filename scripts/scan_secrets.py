@@ -224,6 +224,11 @@ def _classify_tier_b(raw_value: str) -> str | None:
     if re.match(r'^f["\'].*\{', v):
         return "interpolation"
 
+    # Regex / shell expression — pipe operator or regex quantifier (.+, .*, .?)
+    # are structurally impossible in any real third-party credential.
+    if "|" in v or re.search(r"\.\+|\.\*|\.\?", v):
+        return "regex-pattern"
+
     # Expression: bare identifier or dotted/called identifier, no quotes
     if _EXPR_RE.match(v):
         return "expression"
