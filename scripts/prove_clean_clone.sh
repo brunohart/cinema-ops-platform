@@ -75,12 +75,11 @@ while true; do
     "$(docker compose -p "${PROJECT}" ps -q db 2>/dev/null)" \
     --format '{{.State.Health.Status}}' 2>/dev/null || echo "")
 
-  SEED_STATE=$(docker inspect \
-    "$(docker compose -p "${PROJECT}" ps -q seed 2>/dev/null)" \
+  # -a includes stopped containers so we see the seed after it exits.
+  SEED_CID=$(docker compose -p "${PROJECT}" ps -q -a seed 2>/dev/null || echo "")
+  SEED_STATE=$(docker inspect "${SEED_CID}" \
     --format '{{.State.Status}}' 2>/dev/null || echo "")
-
-  SEED_EXIT=$(docker inspect \
-    "$(docker compose -p "${PROJECT}" ps -q seed 2>/dev/null)" \
+  SEED_EXIT=$(docker inspect "${SEED_CID}" \
     --format '{{.State.ExitCode}}' 2>/dev/null || echo "99")
 
   echo "  $(date '+%H:%M:%S') db=${DB_HEALTH} seed=${SEED_STATE}(exit=${SEED_EXIT})"
