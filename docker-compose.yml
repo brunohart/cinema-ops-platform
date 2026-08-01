@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - ./sql/init/001_schemas.sql:/docker-entrypoint-initdb.d/001_schemas.sql:ro
+      - ./sql/init/002_extractor_role.sql:/docker-entrypoint-initdb.d/005_extractor_role.sql:ro
       - ./sql/bronze/001_quarantine.sql:/docker-entrypoint-initdb.d/010_quarantine.sql:ro
       - ./sql/bronze/002_quarantine_grants.sql:/docker-entrypoint-initdb.d/011_quarantine_grants.sql:ro
       - ./sql/001_bronze.sql:/docker-entrypoint-initdb.d/020_landing.sql:ro
@@ -32,6 +33,8 @@ services:
       - ./sql/gold/003_agent_redteam_fixture.sql:/docker-entrypoint-initdb.d/052_agent_redteam_fixture.sql:ro
       - ./sql/init/005_agent_reader_role.sql:/docker-entrypoint-initdb.d/053_agent_reader_role.sql:ro
       - ./sql/init/006_prove_agent_reader_grants.sql:/docker-entrypoint-initdb.d/054_prove_agent_reader.sql:ro
+      - ./sql/init/007_transformer_role.sql:/docker-entrypoint-initdb.d/060_transformer_role.sql:ro
+      - ./sql/init/008_api_role.sql:/docker-entrypoint-initdb.d/061_api_role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
