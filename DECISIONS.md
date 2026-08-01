@@ -489,3 +489,45 @@ roughly a dozen entries with no corresponding code cleanup — that would mean t
 approach has become taxonomy rather than proof.
 
 ---
+
+## ADR-015 — Public demo surface supplements, not replaces, the local tool interface
+
+**Status** Accepted · 2026-08-01 · supplements ADR-010
+
+**Context** VDE-54 asked for a publicly reachable surface so the bearer-scoped tool layer could be
+demonstrated without a local Postgres or Docker install. ADR-010 ruled out managed cloud for the
+_primary_ runtime on the grounds that a reviewer must be able to run the whole thing; that reasoning
+applies to the operational warehouse, not to a read-only fixture demo that exists precisely so a
+reviewer does not need anything installed. (Numbered ADR-015 because ADR-014 was already taken on
+`main` by VDE-51's secrets classifier before this branch merged.)
+
+**Decision** A separate, stdlib-only demo server (`src/agent/demo_server.py`) runs over fixture data
+(`src/agent/demo_data.py`) and can be deployed to Fly.io as a thin public surface once
+`scripts/deploy_fly.sh` runs with a Fly account (`flyctl` in `PATH`; `FLY_API_TOKEN` set). It
+reuses the real policy layer (`agent.refuse.authorize`, `agent.catalog`) so the refusal behaviour is
+identical to the production path — only the data source changes. The demo is not a replacement for
+the local docker-compose environment; it is an illustration of what that environment enforces, using
+fixture rows from `mcp/src/fixtures.ts` (site performance, film attendance) and `mcp/src/tools.ts`
+(sessions).
+
+Concrete choices:
+
+- Three tools only: `get_site_performance`, `get_film_attendance`, `list_sessions`. No Postgres queries; no new tool extensions.
+- Demo token `cinema-ops-demo-2026-08-01` scoped to sites 1 and 2, expiring 2026-08-31. Digest pre-computed; overridable via `AGENT_DEMO_TOKEN_SHA256`.
+- `"dataset": "fixture"` in every response and `X-Cinema-Ops-Dataset: fixture` on every header — the demo cannot be mistaken for live data.
+- No MCP-over-SSE; `GET /tools` returns a manifest instead.
+- No managed Postgres, no pip install in the image, no `DATABASE_URL` or `AGENT_TOKEN` secrets on the Fly app.
+- Entry point `python3 -m agent.demo_server` with `PYTHONPATH=src`. The demo modules must not import `agent.tools`, `agent.limits`, or `src.cli` — no DB driver anywhere in the import graph.
+- Fly concurrency: `type=requests soft=20 hard=40`. No app-level rate limiting; Fly handles machine scaling.
+
+**Consequences** Two entry points (`:8787` for the local scoped-token server; `:8080` for the demo)
+with different data sources but shared policy. A change to `agent.refuse` affects both. The demo
+token expiry (2026-08-31) is hard-coded in `demo_data.py`; rotating it requires a code change and
+redeploy, which is the correct forcing function — it is not a secret managed outside the repository.
+
+**What would change my mind** If the fixture data diverges from the production schema in a way that
+makes the demo misleading rather than illustrative — at that point the demo either needs real data
+(requiring auth and Postgres) or it needs to be retired. Or if the Fly app accumulates unreviewed
+traffic, which would be a signal the demo has become a dependency rather than an illustration.
+
+---

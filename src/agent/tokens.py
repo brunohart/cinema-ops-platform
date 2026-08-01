@@ -15,10 +15,10 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
-import psycopg
-from psycopg.rows import dict_row
+if TYPE_CHECKING:
+    import psycopg
 
 
 @dataclass(frozen=True)
@@ -60,6 +60,9 @@ def resolve_token(
     now: datetime | None = None,
 ) -> AgentToken | None:
     """Look up a live (unexpired, unrevoked) token by plaintext bearer value."""
+    import psycopg  # noqa: F811 — kept out of module scope to avoid eager import
+    from psycopg.rows import dict_row
+
     if not plaintext:
         return None
     digest = hash_token(plaintext)
