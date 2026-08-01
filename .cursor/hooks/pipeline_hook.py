@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Hook dispatcher that enforces the plan → implement → verify pipeline and its ledger.
 
-One script, four events (see `.cursor/hooks.json`):
+One script, five events (see `.cursor/hooks.json`):
 
-    pre-tool        first tool call of a run gets the ledger digest and the protocol;
-                    every Task delegation gets the digest appended to the subagent's prompt
-    subagent-start  records which model actually ran a phase, and warns when it is the wrong one
+    pre-tool        every Task delegation gets the ledger digest appended to the subagent's prompt
+    post-tool       the run is briefed once, with the protocol and the digest
+    subagent-start  records which model actually ran a phase, and reports the wrong one
     subagent-stop   reminds the parent to append the finished phase's ledger entry
-    stop            a run that changed the repo may not finish until all three phases are recorded
+    stop            a run that changed the repo may not finish until all three phases are recorded,
+                    and may not record a phase that no subagent of that phase ever started
 
 Fail-open by design: `failClosed` is false for every hook, so a bug here degrades the pipeline
 to a convention instead of wedging the session. Enforcement is worth having, not worth deadlocking.
