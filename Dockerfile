@@ -1,19 +1,21 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
+
+# postgresql-client for psql in seed_platform.sh; build-essential for wheels
+# that require a C compiler (e.g. psycopg binary fallback).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    build-essential \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# No pip install — stdlib only in the demo surface (VDE-54)
-COPY src/agent/ /app/src/agent/
+COPY . /app
 
-ENV PYTHONPATH=/app/src
-ENV PORT=8080
+RUN pip install --no-cache-dir -e ".[dbt]"
 
-EXPOSE 8080
+ENV PYTHONPATH=/app/src \
+    DBT_PROFILES_DIR=/app/dbt \
+    DAGSTER_HOME=/dagster_home \
+    PYTHONUNBUFFERED=1
 
-RUN groupadd -r demo && useradd -r -g demo -u 10001 demo
-USER 10001
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"
-
-CMD ["python", "-m", "agent.demo_server"]
+RUN mkdir -p /dagster_home

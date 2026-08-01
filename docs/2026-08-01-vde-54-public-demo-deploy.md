@@ -17,8 +17,8 @@
 | `src/agent/tokens.py` | psycopg moved inside `resolve_token` body; TYPE_CHECKING for annotations |
 | `src/agent/refuse.py` | Imports `GET_SITE_PERFORMANCE`, `IMPLEMENTED_TOOLS` from `agent.catalog` |
 | `src/agent/tools.py` | `GET_SITE_PERFORMANCE` imported from `agent.catalog` |
-| `Dockerfile` | python:3.12-slim, no pip install, USER 10001, HEALTHCHECK /healthz |
-| `.dockerignore` | Excludes .git, .venv, docs, dbt, tests, agent-api, mcp, landing, sql |
+| `Dockerfile.demo` | python:3.12-slim, no pip install, USER 10001, HEALTHCHECK /healthz (root `Dockerfile` is the VDE-49 compose image) |
+| `.dockerignore` | Compose-oriented ignore (VDE-49): keeps sql/dbt/src in the build context; excludes .git, caches, `.env`, ledger |
 | `fly.toml` | app=cinema-ops-platform-demo, region=syd, concurrency soft=20 hard=40 |
 | `scripts/deploy_fly.sh` | Exit 2 if no flyctl/FLY_API_TOKEN; else deploy + prove curls |
 | `scripts/prove_public_demo.sh` | 14-section proof: import graph, sha256, fly config, live curls; all sections assert HTTP status codes |
@@ -41,8 +41,8 @@ ok [no_driver_in_import_graph]
 === section 2: sha256 agreement ===
 ok — sha256 digests match plan and demo_data.py
 ok [sha256_agreement]
-=== section 3: fly.toml / Dockerfile consistency ===
-ok — fly.toml and Dockerfile consistent
+=== section 3: fly.toml / Dockerfile.demo consistency ===
+ok — fly.toml and Dockerfile.demo consistent
 ok [fly_toml_dockerfile_consistency]
 === section 4: start demo server on http://127.0.0.1:8788 ===
 cinema-ops demo listening on http://127.0.0.1:8788 (dataset=fixture, tools=3, stdlib-only)

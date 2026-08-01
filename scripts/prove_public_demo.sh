@@ -89,15 +89,17 @@ print("ok — sha256 digests match plan and demo_data.py")
 PY
 echo "ok [sha256_agreement]"
 
-# ── Section 3: fly.toml/Dockerfile/config consistency ────────────────────────
-echo "=== section 3: fly.toml / Dockerfile consistency ==="
+# ── Section 3: fly.toml / Dockerfile.demo consistency ─────────────────────────
+# Root Dockerfile is the VDE-49 compose/platform image (has pip). The public
+# demo image is Dockerfile.demo — fly.toml must point at it.
+echo "=== section 3: fly.toml / Dockerfile.demo consistency ==="
 "$PYTHON" - <<'PY'
 import sys, re
 from pathlib import Path
 
 root = Path(".")
 
-# fly.toml: check app name, internal_port, primary_region
+# fly.toml: check app name, internal_port, primary_region, demo dockerfile
 toml = (root / "fly.toml").read_text()
 if "cinema-ops-platform-demo" not in toml:
     print("FAIL: fly.toml missing expected app name")
@@ -108,23 +110,26 @@ if "internal_port = 8080" not in toml:
 if "syd" not in toml:
     print("FAIL: fly.toml missing primary_region syd")
     sys.exit(1)
+if 'dockerfile = "Dockerfile.demo"' not in toml and "dockerfile = 'Dockerfile.demo'" not in toml:
+    print("FAIL: fly.toml must set dockerfile = \"Dockerfile.demo\" (root Dockerfile is compose)")
+    sys.exit(1)
 
-# Dockerfile: check no pip install, port 8080, user 10001, CMD demo_server
-dockerfile = (root / "Dockerfile").read_text()
+# Dockerfile.demo: check no pip install, port 8080, user 10001, CMD demo_server
+dockerfile = (root / "Dockerfile.demo").read_text()
 if re.search(r"^RUN\s+.*pip\s+install", dockerfile, re.MULTILINE):
-    print("FAIL: Dockerfile contains RUN pip install")
+    print("FAIL: Dockerfile.demo contains RUN pip install")
     sys.exit(1)
 if "8080" not in dockerfile:
-    print("FAIL: Dockerfile missing PORT 8080")
+    print("FAIL: Dockerfile.demo missing PORT 8080")
     sys.exit(1)
 if "10001" not in dockerfile:
-    print("FAIL: Dockerfile missing USER 10001")
+    print("FAIL: Dockerfile.demo missing USER 10001")
     sys.exit(1)
 if "agent.demo_server" not in dockerfile:
-    print("FAIL: Dockerfile CMD does not reference agent.demo_server")
+    print("FAIL: Dockerfile.demo CMD does not reference agent.demo_server")
     sys.exit(1)
 
-print("ok — fly.toml and Dockerfile consistent")
+print("ok — fly.toml and Dockerfile.demo consistent")
 PY
 echo "ok [fly_toml_dockerfile_consistency]"
 

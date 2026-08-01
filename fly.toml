@@ -2,6 +2,7 @@ app = "cinema-ops-platform-demo"
 primary_region = "syd"
 
 [build]
+  dockerfile = "Dockerfile.demo"
 
 [env]
   PORT = "8080"
