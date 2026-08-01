@@ -346,6 +346,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
+| no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -422,6 +423,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
 | [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
+| [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
 with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
