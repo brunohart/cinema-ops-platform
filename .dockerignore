@@ -1,0 +1,13 @@
+.git
+.venv
+docs
+dbt
+tests
+agent-api
+mcp
+landing
+sql
+**/__pycache__
+*.md
+*.pyc
+*.egg-info
