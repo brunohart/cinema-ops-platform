@@ -320,12 +320,17 @@ an assurance that it works on mine. All HTTP is mocked; there are no live API ca
 
 ```bash
 git clone https://github.com/brunohart/cinema-ops-platform && cd cinema-ops-platform
+
+# Full seeded stack — Postgres 16, Redpanda, dbt silver+gold via Dagster,
+# Dagster webserver :3000, agent-tools :8787. One command from a clean clone.
+cp .env.example .env            # port knobs; all have safe defaults
+docker compose up               # db healthy → seed exited 0 → dagster + agent-tools healthy
+
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 pip install -e ".[dbt]"         # dbt-postgres for silver / gold transforms
 
 pytest -q                       # the whole suite
-docker compose up -d db         # Postgres 16, with bronze + quarantine DDL applied at init
 ```
 
 | what it proves | command | observed |
@@ -344,10 +349,12 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
+| `docker compose up` from a clean clone seeds gold (`fct_booking count > 0`); db+redpanda+seed+dagster+agent-tools all healthy | `./scripts/prove_clean_clone.sh` | [recorded](docs/2026-08-01-vde-49-clean-clone-compose.md) — `PROOF OK`, `fct_booking_rows=2` |
 | MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
+
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -423,9 +430,11 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
 | — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
 | [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
+| — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
 | [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
 | [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
+
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
 with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
@@ -473,7 +482,11 @@ ARCHITECTURE.md            what the system is — living, revised, never tidied
 DECISIONS.md               ADR-001…011, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
 RUNBOOK.md                 three likely failures — symptom first, then what on-call does
-docker-compose.yml         Postgres 16, DDL applied at init — the reference environment
+Dockerfile                 multi-stage image: installs Python deps + dbt + dagster
+.dockerignore              keeps .git and local caches out of the build context
+docker-compose.yml         full stack: db + redpanda + seed (Dagster transform) +
+                           dagster :3000 + agent-tools :8787; VFS storage driver required
+                           in this container environment (see docs artefact VDE-49)
 
 src/
   extractors/base.py       the template method: run() is final, fetch() is yours
@@ -496,6 +509,7 @@ sql/
   init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
+  seed/                    bronze seed rows loaded at initdb (bookings, films, etc.)
 
 agent-api/                 allowlisted queries + Hono read path (no SQL door)
 
@@ -507,7 +521,16 @@ dbt/
 
 mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
 evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
-scripts/                   the proof commands, one per claim
+
+scripts/
+  seed_platform.sh         runs inside the compose seed service: dagster job execute
+                           cinema_ops_transform → SEED OK (dagster path), then asserts
+                           fct_booking count > 0
+  prove_clean_clone.sh     end-to-end proof: git clone → cp .env.example .env →
+                           docker compose up → fct_booking_rows > 0 (grain-checked) →
+                           PROOF OK; also asserts seed log shows dagster path
+  (other scripts)          one proof command per claim
+
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
 ```

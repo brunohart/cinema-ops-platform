@@ -1,4 +1,5 @@
 # Local Postgres + Redpanda for bronze / quarantine / streaming proof commands.
+# VDE-49: docker compose up from a clean clone seeds the full stack.
 services:
   db:
     image: postgres:16-alpine
@@ -7,7 +8,7 @@ services:
       POSTGRES_PASSWORD: cinema
       POSTGRES_DB: cinema_ops
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5432}:5432"
     volumes:
       - ./sql/init/001_schemas.sql:/docker-entrypoint-initdb.d/001_schemas.sql:ro
       - ./sql/init/002_extractor_role.sql:/docker-entrypoint-initdb.d/005_extractor_role.sql:ro
@@ -17,6 +18,7 @@ services:
       - ./sql/meta/001_watermarks.sql:/docker-entrypoint-initdb.d/030_meta_watermarks.sql:ro
       - ./sql/meta/002_pipeline_runs.sql:/docker-entrypoint-initdb.d/030_meta_pipeline_runs.sql:ro
       - ./sql/meta/003_agent_access_log.sql:/docker-entrypoint-initdb.d/030_meta_agent_access_log.sql:ro
+      # VDE-41 — scoped tokens table (before cinema_ops / bronze payloads).
       - ./sql/meta/003_agent_tokens.sql:/docker-entrypoint-initdb.d/031_agent_tokens.sql:ro
       - ./sql/cinema_ops/001_bookings.sql:/docker-entrypoint-initdb.d/032_cinema_ops.sql:ro
       - ./sql/bronze/003_raw_cinema_ops.sql:/docker-entrypoint-initdb.d/033_raw_cinema_ops.sql:ro
@@ -27,19 +29,27 @@ services:
       - ./sql/gold/001_fact_grains.sql:/docker-entrypoint-initdb.d/040_fact_grains.sql:ro
       - ./sql/raw/001_film.sql:/docker-entrypoint-initdb.d/040_raw_film.sql:ro
       - ./sql/gold/002_sla_check_columns.sql:/docker-entrypoint-initdb.d/041_sla_check_columns.sql:ro
+      # 042: sql/gold/003_dim_customer.sql is authoritative (bigint PK, PII columns).
+      # sql/gold/002_dim_customer.sql was superseded and is removed from initdb (was 051).
       - ./sql/gold/003_dim_customer.sql:/docker-entrypoint-initdb.d/042_dim_customer.sql:ro
       - ./sql/init/005_agent_role.sql:/docker-entrypoint-initdb.d/043_agent_role.sql:ro
-      - ./sql/meta/002_agent_access_log.sql:/docker-entrypoint-initdb.d/050_agent_access_log.sql:ro
-      - ./sql/gold/002_dim_customer.sql:/docker-entrypoint-initdb.d/051_dim_customer.sql:ro
-      - ./sql/gold/003_agent_redteam_fixture.sql:/docker-entrypoint-initdb.d/052_agent_redteam_fixture.sql:ro
+      # 053/054: agent_reader role and grant verification (authoritative).
+      # sql/meta/002_agent_access_log.sql was superseded by 003_agent_access_log.sql (030)
+      #   and removed from initdb (was 050).
+      # sql/gold/003_agent_redteam_fixture.sql removed (was 052): its CREATE TABLE IF NOT
+      #   EXISTS on gold.dim_film silently no-ops against the text-keyed schema from 041,
+      #   then its bigint-keyed INSERTs fail on the missing title column (VDE-49 planner lesson).
       - ./sql/init/005_agent_reader_role.sql:/docker-entrypoint-initdb.d/053_agent_reader_role.sql:ro
       - ./sql/init/006_prove_agent_reader_grants.sql:/docker-entrypoint-initdb.d/054_prove_agent_reader.sql:ro
       # VDE-38 — read-only api role over gold (Hono agent-api/server connects as this)
       - ./sql/init/005_api_role.sql:/docker-entrypoint-initdb.d/055_api_role.sql:ro
+      # 060: demo bronze seed so dagster cinema_ops_transform produces fct_booking rows.
+      - ./sql/seed/001_demo_bronze.sql:/docker-entrypoint-initdb.d/060_demo_bronze.sql:ro
       # VDE-52 — transformer (bronze read / silver+gold write) then api extensions
-      # (dim_customer column grants + FOR ROLE transformer default-privilege revokes)
-      - ./sql/init/007_transformer_role.sql:/docker-entrypoint-initdb.d/060_transformer_role.sql:ro
-      - ./sql/init/008_api_role.sql:/docker-entrypoint-initdb.d/061_api_role.sql:ro
+      # (dim_customer column grants + FOR ROLE transformer default-privilege revokes).
+      # Numbered after 060 so they do not collide with the demo seed mount.
+      - ./sql/init/007_transformer_role.sql:/docker-entrypoint-initdb.d/061_transformer_role.sql:ro
+      - ./sql/init/008_api_role.sql:/docker-entrypoint-initdb.d/062_api_role.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cinema -d cinema_ops"]
       interval: 2s
@@ -52,21 +62,21 @@ services:
     command:
       - redpanda
       - start
-      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
-      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
-      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
-      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
-      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:${RP_KAFKA_PORT:-19092}
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:${RP_KAFKA_PORT:-19092}
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:${RP_PROXY_PORT:-18082}
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:${RP_PROXY_PORT:-18082}
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:${RP_SCHEMA_PORT:-18081}
       - --rpc-addr redpanda:33145
       - --advertise-rpc-addr redpanda:33145
       - --mode dev-container
       - --smp 1
       - --default-log-level=warn
     ports:
-      - "18081:18081"
-      - "18082:18082"
-      - "19092:19092"
-      - "19644:9644"
+      - "${RP_SCHEMA_PORT:-18081}:${RP_SCHEMA_PORT:-18081}"
+      - "${RP_PROXY_PORT:-18082}:${RP_PROXY_PORT:-18082}"
+      - "${RP_KAFKA_PORT:-19092}:${RP_KAFKA_PORT:-19092}"
+      - "${RP_ADMIN_PORT:-19644}:9644"
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
       interval: 3s
@@ -93,3 +103,82 @@ services:
         done
         rpk topic list --brokers localhost:9092
     restart: "no"
+
+  # Run dbt silver + gold transforms over the bronze seed, then assert fct_booking > 0.
+  seed:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://cinema:cinema@db:5432/cinema_ops"
+      DB: "postgresql://cinema:cinema@db:5432/cinema_ops"
+      DBT_HOST: db
+      DBT_PORT: "5432"
+      DBT_USER: cinema
+      DBT_PASSWORD: cinema
+      DBT_DBNAME: cinema_ops
+      DBT_PROFILES_DIR: /app/dbt
+      DAGSTER_HOME: /dagster_home
+      AGENT_READER_PASSWORD: "${AGENT_READER_PASSWORD:-agent_reader}"
+    volumes:
+      - dagster_home:/dagster_home
+    restart: "no"
+    command: bash scripts/seed_platform.sh
+
+  # Dagster webserver — starts only after seed completes successfully.
+  dagster:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: "postgresql://cinema:cinema@db:5432/cinema_ops"
+      DB: "postgresql://cinema:cinema@db:5432/cinema_ops"
+      DBT_HOST: db
+      DBT_PORT: "5432"
+      DBT_USER: cinema
+      DBT_PASSWORD: cinema
+      DBT_DBNAME: cinema_ops
+      DBT_PROFILES_DIR: /app/dbt
+      DAGSTER_HOME: /dagster_home
+      KAFKA_BOOTSTRAP: "redpanda:9092"
+      TMDB_API_KEY: "${TMDB_API_KEY:-}"
+    volumes:
+      - dagster_home:/dagster_home
+    ports:
+      - "${DAGSTER_PORT:-3000}:3000"
+    command: dagster dev -w workspace.yaml -h 0.0.0.0 -p 3000
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',3000)); s.close()\""]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  # Agent tools HTTP surface — depends on seed so agent_reader password is set.
+  agent-tools:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    environment:
+      AGENT_TOOLS_HOST: "0.0.0.0"
+      AGENT_TOOLS_PORT: "8787"
+      AGENT_TOOL_TOKEN: "${AGENT_TOOL_TOKEN:-dev-token-change-me}"
+      AGENT_DATABASE_URL: "postgresql://agent_reader:${AGENT_READER_PASSWORD:-agent_reader}@db:5432/cinema_ops"
+    ports:
+      - "${AGENT_TOOLS_PORT:-8787}:8787"
+    command: python -m agent.server
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz')\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  dagster_home:

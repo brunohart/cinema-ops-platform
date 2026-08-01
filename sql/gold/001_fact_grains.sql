@@ -42,11 +42,29 @@ CREATE TABLE IF NOT EXISTS gold.fct_showtime_performance (
 
 -- Seed: one four-ticket booking across one session, plus a second booking of one.
 -- The ticket fact has four rows; the booking fact has two. Same money, two grains.
-INSERT INTO gold.fct_booking (booking_id, booking_fee, booking_total, channel)
-VALUES
-    ('B-100', 2.50, 54.50, 'web'),
-    ('B-101', 0.00, 15.00, 'box_office')
-ON CONFLICT (booking_id) DO NOTHING;
+--
+-- Guard: dbt materializes fct_booking as a table, which drops and recreates it
+-- without the booking_fee column. If this SQL is applied after dbt has run (e.g.
+-- on a re-run against a live volume), the INSERT would fail with "column
+-- booking_fee does not exist". The DO block skips the INSERT in that case —
+-- dbt's own rows are already present and satisfy the fct_booking count > 0
+-- assertion used by the compose proof.
+DO $$
+BEGIN
+  IF EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'gold'
+        AND table_name = 'fct_booking'
+        AND column_name = 'booking_fee'
+  ) THEN
+    INSERT INTO gold.fct_booking (booking_id, booking_fee, booking_total, channel)
+    VALUES
+        ('B-100', 2.50, 54.50, 'web'),
+        ('B-101', 0.00, 15.00, 'box_office')
+    ON CONFLICT (booking_id) DO NOTHING;
+  END IF;
+END
+$$;
 
 INSERT INTO gold.fct_ticket_sale (
     ticket_id, booking_id, session_id, seat_label, ticket_price
