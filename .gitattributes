@@ -1,0 +1,4 @@
+# The agent ledger is append-only and written by concurrent runs on separate branches. Union merge
+# keeps both sides' entries instead of raising a conflict on the last line; the per-session hash
+# chain in scripts/agent_ledger.py is what stays intact regardless of how the lines interleave.
+docs/agent-ledger/ledger.jsonl merge=union

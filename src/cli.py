@@ -356,6 +356,17 @@ def cmd_consume_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve_tools(args: argparse.Namespace) -> int:
+    """Serve the bounded agent tools HTTP surface (VDE-44 / ADR-009)."""
+    _load_dotenv()
+    from agent.server import main as agent_main
+
+    argv = ["--host", args.host, "--port", str(args.port), "--require-env-token"]
+    if args.dsn:
+        argv.extend(["--dsn", args.dsn])
+    return agent_main(argv)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="src.cli", description="cinema-ops-platform CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -488,7 +499,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     consume_events_p.set_defaults(func=cmd_consume_events)
 
-    agent = sub.add_parser("agent", help="Scoped agent tokens + tools server (VDE-41)")
+    agent = sub.add_parser("agent", help="Scoped agent tokens + tools server (VDE-41/45)")
     agent_sub = agent.add_subparsers(dest="agent_cmd", required=True)
 
     mint = agent_sub.add_parser(
@@ -521,7 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     serve_p = agent_sub.add_parser(
         "serve",
-        help="HTTP tools server on :8787 (Authorization: Bearer)",
+        help="HTTP tools server on :8787 (scoped Bearer + refusal gate)",
     )
     serve_p.add_argument("--host", default="127.0.0.1")
     serve_p.add_argument("--port", type=int, default=8787)
@@ -531,6 +542,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Do not bootstrap agent token / site_performance DDL",
     )
     serve_p.set_defaults(func=cmd_agent_serve)
+
+    serve = sub.add_parser("serve", help="Serve a local HTTP surface")
+    serve_sub = serve.add_subparsers(dest="target", required=True)
+    serve_tools = serve_sub.add_parser(
+        "tools",
+        help="Agent tools on :8787 — hard row limits + statement_timeout (VDE-44)",
+    )
+    serve_tools.add_argument("--host", default="127.0.0.1")
+    serve_tools.add_argument("--port", type=int, default=8787)
+    serve_tools.add_argument("--dsn", default=None, help="Override AGENT_DATABASE_URL / DB")
+    serve_tools.set_defaults(func=cmd_serve_tools)
 
     return parser
 

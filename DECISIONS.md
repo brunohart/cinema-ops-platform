@@ -2,7 +2,7 @@
 
 **Status:** living record. One ADR per real choice, written at the moment the choice was made.
 **Started:** 2026-07-30
-**Last revised:** 2026-07-31
+**Last revised:** 2026-07-31 (ADR-013)
 **Companion to:** `ARCHITECTURE.md` — that file states what the system is, this one states why it is
 that and not something else.
 
@@ -383,5 +383,67 @@ evidence.
 codec for the topic, not a single bad event) — there advancing past it would hide a systemic
 failure. Or a regulatory path that forbids acknowledging an event before it is durably landable in
 bronze under any circumstance.
+
+---
+
+## ADR-013 — Three models with a ledger between them, not one model with better instructions
+
+**Status** Accepted · 2026-07-31
+
+**Context** Most of this repository was built by agents, and the failure modes were consistent
+rather than random. An agent that plans and implements in the same breath treats its first idea as
+the design, because there is no moment where the design is a separate artefact that could be wrong.
+An agent that checks its own work grades an exam it wrote — it knows what it meant, so it reads what
+it meant. And every run started from zero: a trap discovered on Tuesday was rediscovered on
+Wednesday, because nothing carried between runs except the code, and the code does not record what
+nearly went wrong. The obvious response is a longer prompt. I have tried that. Instructions are
+followed by a model that has read them and is not under pressure to finish.
+
+The other half of the context is cost. Opus is the model I want deciding what to build and judging
+whether it was built; it is not the model I want writing the twentieth similar dbt test. Those are
+different jobs and they do not need the same model.
+
+**Decision** Three phases, three separate agent contexts, a model pinned to each, and an append-only
+ledger between them. Plan on Opus, read-only. Implement on Sonnet, given a plan it did not write.
+Verify on Opus, read-only, running the proof command itself. Each phase appends one entry to
+`docs/agent-ledger/ledger.jsonl` naming the model that actually ran it and one lesson a later run
+would otherwise rediscover; each phase reads the accumulated lessons before it starts.
+
+Read-only is the load-bearing part of both Opus phases. A planner that can edit stops planning and
+starts building. A verifier that can fix the gap it found will fix it quietly and report success —
+the finding disappears into the diff, and "done" stops meaning anything. Taking away the ability to
+write is what converts a reviewer into a checker.
+
+The protocol lives in `.cursor/rules/agent-pipeline.mdc` (always applied) and `AGENTS.md`, and is
+enforced by hooks in `.cursor/hooks.json`: the digest is injected into every delegation, the model
+that actually ran each phase is recorded from the hook's own input rather than the agent's word, and
+a run that changed the repository cannot finish while any of the three entries is missing. The
+ledger is hash-chained per session, so an entry edited to look better is detectable — the same
+argument as bronze being append-only, applied to the record of the agents' own work.
+
+**Consequences** Three model contexts per issue instead of one: more tokens, more wall-clock, and a
+hand-off where the plan can be misread. Small issues pay the same overhead as large ones, which is
+why the exemption exists for runs that change nothing — and why the exemption is itself a recorded
+entry rather than a silent skip. The ledger grows monotonically and will eventually need summarising;
+`digest` is budgeted for that day and `promote` is the pressure valve, moving a lesson that has
+recurred three times into `CLAUDE.md`, where it is read on every turn and no longer needs
+rediscovering.
+
+Two costs I want on the record. The ledger is a file agents write and later agents read, which makes
+it an injection surface: a lesson is instruction-shaped text reaching a future run's context. The
+mitigation is that it is committed, diffed and reviewed like code — weaker than a schema, stronger
+than a convention, and the reason entries are bounded and the ledger is never rewritten. And Cursor
+publishes no list of model ids, so `claude-sonnet-5` is inferred; if it is wrong the phase silently
+inherits the parent's model. That is exactly why `subagentStart` records what actually ran and files
+the disagreement as a `note` — the pipeline reports its own misconfiguration rather than mislabelling
+it.
+
+**What would change my mind** A single model that plans, implements and checks with genuinely
+independent judgement at each step — a self-check that catches what a fresh reviewer would, which is
+a property I would have to measure rather than assume. Or the ledger going a fortnight with no
+lesson that changed a later run's behaviour: that would mean I built a diary, not a feedback loop,
+and a diary should be deleted rather than maintained. Or the reverse failure — the ledger accruing
+so many entries that the digest becomes noise a model skims, at which point the honest move is to
+promote aggressively into `CLAUDE.md` and truncate, not to keep injecting more.
 
 ---

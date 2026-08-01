@@ -343,6 +343,7 @@ docker compose up -d db         # Postgres 16, with bronze + quarantine DDL appl
 | gold schema tests — `unique`, `not_null`, `relationships`, `accepted_values` | `./scripts/prove-schema-tests.sh` | [recorded](docs/2026-07-31-vde-30-schema-tests.md) — `PASS=31`, `--store-failures` |
 | no booking without a session (singular business-rule test) | `./scripts/prove_singular_business_rule.sh` | [recorded](docs/2026-07-31-vde-32-singular-business-rule.md) — `PASS=1`; orphan booking fails |
 | append-only `meta.pipeline_runs` — what ran, duration, outcome; no UPDATE grant | `./scripts/prove_pipeline_runs.sh` | [recorded](docs/2026-07-31-vde-36-pipeline-runs.md) |
+| MCP boundary — in-scope rows, out-of-scope `refused: true`, no PII field in any response | `./scripts/prove_mcp_eval.sh` | [recorded](docs/2026-07-31-vde-47-mcp-eval.md) — 3/3 passed |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -369,6 +370,7 @@ incident. Same problem; the only variable is when you looked.
 | [CLAUDE.md](CLAUDE.md) | the working rules, and the rules for changing the rules | a rule is written the moment a mistake proves it necessary — never speculatively; every edit is its own dated commit naming the incident |
 | [docs/the-read-path.md](docs/the-read-path.md) | the essay this repository argues for | *Theatrical Research · 01* |
 | [docs/thesis-map.md](docs/thesis-map.md) | the join between the two | if a paragraph in the essay has no row in the map, it is an opinion and should either be cut or be built |
+| [docs/agent-ledger/](docs/agent-ledger/) | what the agents that build this repository have learned | append-only and hash-chained per run; every phase reads it before it plans and writes to it before it hands over, so a trap is hit once rather than every run |
 
 Four mechanisms are doing real work across all of them:
 
@@ -415,6 +417,28 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
 | — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
 | [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
+| [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
+
+That last row is the only one with no issue id, and it stays visibly empty rather than being filled
+in with something plausible: the Linear MCP server was unauthenticated for the run that built it, so
+there was no issue to trace it to. The trail records the gap.
+
+### How the work gets done — plan, implement, verify
+
+Every issue that reaches an agent here, from Linear or anywhere, runs through three phases with a
+different model on each: **plan on Opus** (read-only — a planner that can edit stops planning),
+**implement on Sonnet** against a plan it did not write, then **verify on Opus** (read-only — a
+checker that can quietly fix what it found will report success instead of the finding). Each phase
+appends one lesson to [`docs/agent-ledger/ledger.jsonl`](docs/agent-ledger/) and reads the
+accumulated lessons before it starts, so the next run begins where the last one left off rather than
+at zero. A lesson that recurs three times is promoted into `CLAUDE.md`, which is read on every turn —
+that is the loop closing.
+
+Hooks in `.cursor/hooks.json` make it structural rather than aspirational: the lessons are injected
+into every delegation, the model that *actually* ran each phase is recorded from the hook's own
+input rather than the agent's word, and a run that changed the repository cannot finish while any of
+the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
+with nothing installed but Python and git.
 
 ### Specified, not yet built
 
@@ -468,6 +492,8 @@ dbt/
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
 
+mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
+evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 scripts/                   the proof commands, one per claim
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
