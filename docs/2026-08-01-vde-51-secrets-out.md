@@ -40,12 +40,12 @@ $ ./scripts/prove_no_secrets.sh
   shallow clone: no
 
 --- issue-shaped grep over full history (reported; gate is classifier below)
-  issue-shaped grep over full history: 13 matching lines
+  issue-shaped grep over full history: 17 matching lines
   (classified below; a history count can only grow — see docs/2026-08-01-vde-51-secrets-out.md)
 
 --- credential classifier (tier A + tier B + .env.example)
 tier A hits: 0
-tier B matches: 66  (blank=2  expression=22  interpolation=4  low-entropy=2  placeholder=6  prose=29  regex-pattern=1)
+tier B matches: 70  (blank=2  expression=22  interpolation=4  low-entropy=2  placeholder=6  prose=31  regex-pattern=3)
 unaccounted: 0
 env-example: blank-valued and complete
 
