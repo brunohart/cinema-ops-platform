@@ -84,6 +84,7 @@ export function createFixtureDb(): DbHandle {
         const logFile = process.env.AGENT_ACCESS_LOG_FILE;
         if (logFile !== undefined && logFile.length > 0 && values !== undefined) {
           const entry = {
+            at: new Date().toISOString(),
             token_label: values[0],
             tool: values[1],
             params: values[2],
