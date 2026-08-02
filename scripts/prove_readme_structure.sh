@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # prove_readme_structure.sh — machine checks for the VDE-53 README restructure.
 #
-# Nine checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
-# Ends with PASS=9 and exits 0 only when all nine pass.
+# Ten checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
+# Ends with PASS=10 and exits 0 only when all ten pass.
 #
 #   ./scripts/prove_readme_structure.sh
 #
@@ -29,7 +29,7 @@ anchors = [
     "## What happens when a source breaks",
     "## 60-second quickstart",
     "## The agent interface, and why it is safe",
-    "## What I deliberately did not build",
+    "## What I would do differently at circuit scale — and what I deliberately did not build",
     "## Below the fold — the long form",
 ]
 
@@ -383,7 +383,7 @@ def find_section(heading, lines):
     return next((i for i, ln in enumerate(lines) if ln.rstrip() == heading), None)
 
 sec1 = find_section("# cinema-ops-platform", lines)
-sec6 = find_section("## What I deliberately did not build", lines)
+sec6 = find_section("## What I would do differently at circuit scale — and what I deliberately did not build", lines)
 fold = find_section("## Below the fold — the long form", lines)
 
 if sec1 is None or sec6 is None or fold is None:
@@ -453,5 +453,86 @@ if failed:
 print(f"  ok   — all {len(sentinels)} sentinel phrases present below the fold")
 PY
 
+# ── check 10: section 6 — scale numbers, first-week moves, no stale claims ────
 echo ""
-echo "PASS=9"
+echo "== 10. section 6 — scale bullets carry numbers; every omission has a one-sentence first-week move =="
+python3 - <<'PY' || exit 1
+import os, re, sys
+
+SEC6 = "## What I would do differently at circuit scale — and what I deliberately did not build"
+SUB_SCALE = "### At circuit scale, these break first"
+SUB_CUT = "### Deliberately not built"
+FOLD = "## Below the fold — the long form"
+
+lines = open("README.md").read().splitlines()
+
+def find(heading):
+    hits = [i for i, ln in enumerate(lines) if ln.rstrip() == heading]
+    if len(hits) != 1:
+        print(f"  FAIL — expected exactly one {heading!r}, found {len(hits)}", file=sys.stderr)
+        sys.exit(1)
+    return hits[0]
+
+sec6, scale, cut, fold = find(SEC6), find(SUB_SCALE), find(SUB_CUT), find(FOLD)
+if not sec6 < scale < cut < fold:
+    print("  FAIL — section 6 sub-headings are out of order", file=sys.stderr)
+    sys.exit(1)
+
+def bullets(start, end):
+    return [ln for ln in lines[start:end] if ln.startswith("- ")]
+
+scale_bullets = bullets(scale, cut)
+cut_bullets = bullets(cut, fold)
+
+if len(scale_bullets) < 4:
+    print(f"  FAIL — scale sub-section has {len(scale_bullets)} bullet(s), need >= 4", file=sys.stderr)
+    sys.exit(1)
+for b in scale_bullets:
+    if not re.search(r"\d", b):
+        print(f"  FAIL — scale bullet carries no number, so it cannot be wrong: {b[:70]}", file=sys.stderr)
+        sys.exit(1)
+
+if len(cut_bullets) < 4:
+    print(f"  FAIL — 'deliberately not built' has {len(cut_bullets)} bullet(s), need >= 4", file=sys.stderr)
+    sys.exit(1)
+
+def prose(text):
+    """Drop inline code spans and link targets — their dots are not sentence ends."""
+    text = re.sub(r"`[^`]*`", "", text)
+    return re.sub(r"\]\([^)]*\)", "]", text)
+
+for b in cut_bullets:
+    if "*First week:*" not in b:
+        print(f"  FAIL — omission with no first-week move (cut it or answer it): {b[:70]}", file=sys.stderr)
+        sys.exit(1)
+    move = prose(b.split("*First week:*", 1)[1])
+    dots = move.count(".")
+    if dots != 1:
+        print(f"  FAIL — first-week move is not one sentence ({dots} sentence ends): {move.strip()[:70]}", file=sys.stderr)
+        sys.exit(1)
+
+# Freshness tripwires — a claim that something is unbuilt must die when it is built.
+sec6_text = "\n".join(lines[sec6:fold])
+wf_dir = ".github/workflows"
+workflows = ""
+if os.path.isdir(wf_dir):
+    for name in sorted(os.listdir(wf_dir)):
+        workflows += open(os.path.join(wf_dir, name)).read()
+
+tripwires = [
+    (os.path.exists("mcp/src/tools.ts"), r"(?i)the MCP server itself"),
+    (os.path.exists("dbt/models/gold/fct_booking.sql"), r"(?i)models not yet written"),
+    (os.path.exists("src/orchestration/checks.py"), r"(?i)asset checks?\s*/\s*SLAs"),
+    ("prove_synopsis_injection.sh" in workflows, r"(?i)runs in no workflow at all"),
+]
+for built, pattern in tripwires:
+    if built and re.search(pattern, sec6_text):
+        print(f"  FAIL — section 6 claims something is unbuilt that now exists: /{pattern}/", file=sys.stderr)
+        sys.exit(1)
+
+print(f"  ok   — {len(scale_bullets)} scale bullets with numbers; "
+      f"{len(cut_bullets)} omissions, each with a one-sentence first-week move")
+PY
+
+echo ""
+echo "PASS=10"
