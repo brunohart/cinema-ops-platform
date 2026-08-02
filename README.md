@@ -101,6 +101,28 @@ Each names the first move if I had a week; an item I could not answer that for w
 
 ---
 
+## How this was built with AI
+
+The claim here is not *I used AI* — it is *there is a practice*, and a practice is something a
+script can check rather than something you have to take my word for.
+
+- **Spec before prompting.** Commit one (`4f05bb5`, 2026-07-30) is `ARCHITECTURE.md`,
+  `DECISIONS.md` and toolchain config — no code, nothing under `src/`, `dbt/`, `sql/`, `tests/` or
+  `scripts/`. The first pipeline code landed a day later. Prompting ran against that spec, not a
+  blank page.
+- **Tests read the implementation before they were written.** Paired by basename against the code
+  they test, no test's own first commit precedes the implementation's.
+- **Plan, implement, verify — every issue.** Opus plans (read-only), Sonnet implements, Opus
+  verifies (read-only); each phase appends its lesson to
+  [`docs/agent-ledger/`](docs/agent-ledger/) before handing over, so the next run starts past traps
+  the last one already hit.
+- **Gates the model could not talk past.** `ruff`, `mypy`, `pytest` and `dbt` test failures fail CI,
+  and a hook refuses to let a repo-changing run finish unrecorded.
+
+`./scripts/prove_ai_practice.sh` — [recorded](docs/2026-08-02-vde-58-ai-first-practice.md).
+
+---
+
 ## Below the fold — the long form
 
 <div align="center">
@@ -161,6 +183,8 @@ pytest -q                       # the whole suite
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
 | section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
+| spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
+| 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -355,6 +379,10 @@ input rather than the agent's word, and a run that changed the repository cannot
 the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
 with nothing installed but Python and git.
 
+That the spec preceded the code, and not only that the pipeline exists, is what
+[`./scripts/prove_ai_practice.sh`](docs/2026-08-02-vde-58-ai-first-practice.md) checks against git
+history directly, above the fold.
+
 </details>
 
 <details>
@@ -438,6 +466,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 | [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
+| — | VDE-57 | 3-minute Loom: rehearsable shot list (7 beats), two demo entry points, SLACK_WEBHOOK_URL in compose, PASS=10 proof | [#54](https://github.com/brunohart/cinema-ops-platform/pull/54) |
 
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
@@ -507,7 +536,13 @@ scripts/
                            docker compose up → fct_booking_rows > 0 (grain-checked) →
                            PROOF OK; also asserts seed log shows dagster path
   prove_public_demo.sh     public demo surface proof (stdlib-only, no Postgres)
+  demo_prepare.sh          create cinema_redteam, apply redteam SQL set, poison synopsis (VDE-57)
+  prove_loom_demo.sh       shot list + entry point proof — bash+python3 only, PASS=10 (VDE-57)
   (other scripts)          one proof command per claim
+
+demo/
+  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57)
+  inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
