@@ -34,7 +34,7 @@ if [[ "$(git rev-parse --is-shallow-repository)" != "false" ]]; then
 fi
 
 # ── check 1: commit one is spec-only ──────────────────────────────────────────
-echo "== 1. commit one is spec-only (ARCHITECTURE.md + DECISIONS.md, nothing else) =="
+echo "== 1. commit one carries no code (spec + toolchain config) =="
 python3 - <<'PY' || exit 1
 import subprocess, sys
 
