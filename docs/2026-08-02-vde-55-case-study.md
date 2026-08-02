@@ -98,8 +98,8 @@ PASS=10
   ok   — git clone + script line; scripts/quickstart.sh exists, is executable, URL matches PRINTED_URL
 == 7. section 5 — agent_access_log, absent, no PII column names ==
   ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names
-== 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words ==
-  ok   — section 6 has 5 bullets; sections 1–6 are 970 words (≤ 1300)
+== 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words; no stale unbuilt-claims ==
+  ok   — section 6 has 5 bullets, no stale unbuilt-claims; sections 1–6 are 982 words (≤ 1300)
 
 == bash -n scripts/quickstart.sh ==
   ok   — bash -n scripts/quickstart.sh
