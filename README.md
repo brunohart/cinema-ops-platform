@@ -81,8 +81,6 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
-- **`silver` and `gold` dbt transforms** (grain scaffold declared; models not yet written — see VDE-26) and **Dagster asset checks / SLAs** ([ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness)) — the next build increment.
-- **The MCP server itself** — the `meta.agent_access_log` store and the allowlisted query layer exist; the server that exposes them to a client does not. The interface is specified and the safety properties are structural; the wire protocol is the last mile.
 - **The evaluation layer beyond the VDE-48 synopsis-injection red-team fixture** — an injection-resistance claim with no test behind it is a hope with good posture. Adversarial prompt-injection testing is built alongside the pipeline rather than added later.
 - **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
 - **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
