@@ -87,6 +87,8 @@ Stated plainly, because a gap I have named is worth more than a gap a reviewer f
 - **No real operator data** — this holds synthetic data and is not trying to become a product.
 - **The bronze-immutability guard is currently red on `main`, and it is right to be** — a test-only `reset_tables()` helper containing `TRUNCATE` landed inside `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. The fix is to move the helper out of `src/`; the incident stays visible rather than being tidied away.
 
+*The problem this repository exists to answer, the four failure modes and how each is handled, and the governance model behind it, argued end to end: [`docs/2026-08-02-vde-55-case-study.md`](docs/2026-08-02-vde-55-case-study.md).*
+
 ---
 
 ## Below the fold — the long form
@@ -148,6 +150,7 @@ pytest -q                       # the whole suite
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
+| case study — six section anchors, word band, operator-language test, staleness guard against what has actually shipped | `./scripts/prove_case_study.sh` | [recorded](docs/2026-08-02-vde-55-case-study.md) — `PASS=10` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -371,6 +374,7 @@ incident. Same problem; the only variable is when you looked.
 | [docs/the-read-path.md](docs/the-read-path.md) | the essay this repository argues for | *Theatrical Research · 01* |
 | [docs/thesis-map.md](docs/thesis-map.md) | the join between the two | if a paragraph in the essay has no row in the map, it is an opinion and should either be cut or be built |
 | [docs/agent-ledger/](docs/agent-ledger/) | what the agents that build this repository have learned | append-only and hash-chained per run; every phase reads it before it plans and writes to it before it hands over, so a trap is hit once rather than every run |
+| [docs/2026-08-02-vde-55-case-study.md](docs/2026-08-02-vde-55-case-study.md) | the problem, the four failure modes and how each is handled, the governance model — argued end to end | proof command run inline; section 6 checked against what is actually on disk rather than restated from memory |
 
 Four mechanisms are doing real work across all of them:
 
