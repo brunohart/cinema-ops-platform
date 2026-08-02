@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 from dagster import (
@@ -133,6 +134,14 @@ def test_sensor_posts_on_failure_only(monkeypatch: pytest.MonkeyPatch) -> None:
     from dagster._core.utils import make_new_run_id
 
     from orchestration.alerts import slack_asset_check_alert_sensor
+
+    # This case asserts against the full ``Definitions``, which builds a
+    # ``DbtCliResource`` and so needs the dbt binary. Skip rather than fail when the
+    # optional [dbt] extra is absent: a missing optional dependency is a gap in the
+    # environment, not a defect in the sensor under test.
+    if shutil.which("dbt") is None:
+        pytest.skip("dbt executable not on PATH; install the [dbt] extra")
+
     from orchestration.definitions import defs
 
     posts: list[dict] = []

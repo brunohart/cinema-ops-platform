@@ -16,7 +16,7 @@ Four source shapes, one extractor, bronze as landed, silver conformed, gold serv
 
 ## What happens when a source breaks
 
-Each row says: *this source will fail in this way, and here is the thing I built so that I find out.* All rows are `PREDICTED` — reasoned but not yet witnessed.
+Each row says: *this source will fail in this way, and here is the thing I built so that I find out.* All rows are `PREDICTED` — reasoned, not yet witnessed. That is itself a finding, and [ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections) records what it costs the claim.
 
 | # | source | how it fails | why that happens | how I detect it | mitigation | status |
 |---|--------|--------------|------------------|-----------------|------------|--------|
@@ -81,28 +81,24 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 ### At circuit scale, these break first
 
-- **A continuous, model-graded adversarial evaluation suite standing on every PR** — the VDE-48 synopsis-injection red-team fixture and the MCP boundary eval (`evals/mcp.yaml`, `evals/redteam.yaml`, proved by `scripts/prove_mcp_eval.sh`) are deterministic and built; a broader suite that grades novel adversarial prompts on every change, rather than a fixed fixture, is not.
-- **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
-- **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
-- **No real operator data** — this holds synthetic data and is not trying to become a product.
-- **The bronze-immutability guard is currently red on `main`, and it is right to be** — a test-only `reset_tables()` helper containing `TRUNCATE` landed inside `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. The fix is to move the helper out of `src/`; the incident stays visible rather than being tidied away.
-Vista's customers run hundreds of sites and years of transactions. The numbers below are mine, and specific enough to be wrong.
+A national circuit runs hundreds of sites and years of transactions; this build runs four sources on one machine. The numbers below are mine, and specific enough to be wrong.
 
-- **`fct_booking` past ~50M rows.** Postgres is a row store ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)); somewhere in the tens of millions the gold aggregates behind a tool call stop being index scans. The move is a columnar engine behind the same dbt models, not a bigger instance.
-- **Four sources become hundreds of sites.** One extractor per shape stops being the unit of work: Dagster partitions keyed on `site_id`, a per-site run log, and a budget where 3 sites of 400 failing is a ticket rather than a page.
-- **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, updated at the end of every run. At 400 sites the key has to become `(site_id, source)` and the table partitioned by site, or the whole fleet serialises behind one lock.
-- **One Slack webhook becomes routing.** `slack_asset_check_alert_sensor` posts every failure to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for the warnings.
+- **`fct_booking` past ~50M rows.** Postgres is a row store ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)); in the tens of millions the gold aggregates behind a tool call stop being index scans. The move is a columnar engine behind the same dbt models, not a bigger instance.
+- **Four sources become hundreds of sites.** One extractor per shape stops being the unit of work: partitions keyed on `site_id`, a per-site run log, and a budget where 3 of 400 failing is a ticket, not a page.
+- **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, written at the end of every run. At 400 sites it has to become `(site_id, source)`, partitioned by site, or the fleet serialises behind one lock.
+- **One Slack webhook becomes routing.** Every failure posts to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for warnings.
 
 ### Deliberately not built
 
 Each names the first move if I had a week; an item I could not answer that for was cut.
 
-- **Real CDC** — rejected on operational grounds, not technical ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
-- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on top of it. *First week:* a `--from/--to` backfill CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
+- **Real CDC** — rejected on operational, not technical grounds ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
+- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
 - **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
-- **A red team that runs on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 synopsis-injection proof runs in no workflow at all. *First week:* drop the path filter and run it against the CI Postgres service.
-- **No real operator data** — synthetic rows throughout, and none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
-- **The bronze-immutability guard is red on `main`, and it is right to be** — a test-only `reset_tables()` containing `TRUNCATE` landed in `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught what it was written to catch. *First week:* move the helper into `tests/`.
+- **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
+- **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
+- **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
+- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
 
 ---
 
@@ -173,7 +169,7 @@ pytest -q                       # the whole suite
 | every bronze row carries the four audit columns; `_payload_hash` is stable across runs | `pytest tests/extractors/test_stamp.py -q` | 3 passed |
 | TMDB pagination, `429` + `Retry-After`, incremental date filter — all mocked | `pytest tests/extractors/test_tmdb.py -q` | 9 passed |
 | a re-run produces **zero** duplicates, against a throwaway Postgres | `CINEMA_TEST_DATABASE_URL=… pytest tests/test_idempotency.py -q` | 4 skipped with no database reachable |
-| bronze is append-only in the source tree as well as in the grants | `./scripts/prove-bronze-immutable.sh` | **currently red — see below** |
+| bronze is append-only in the source tree as well as in the grants | `./scripts/prove-bronze-immutable.sh` | `0` mutations in `src/` — green since 2026-08-03, [what it caught first](ARCHITECTURE.md#7-field-corrections) |
 | the extractor role physically cannot `UPDATE` bronze | `psql -d cinema_ops -v ON_ERROR_STOP=1 -f sql/init/004_kill_test_extractor_immutable.sql` | [recorded](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md) |
 | bad rows quarantine with `raw_payload` retained, and the batch completes | `./scripts/prove_quarantine.sh` | proof query returns the rejected groups |
 | every gold fact has one row per declared grain key | `./scripts/prove_fact_grain.sh` | [recorded](docs/2026-07-31-vde-26-fact-grain.md) |
@@ -194,15 +190,16 @@ pytest -q                       # the whole suite
 | spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
 | 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
 
-> [!WARNING]
-> **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
-> `reset_tables()` helper containing `TRUNCATE bronze_raw, …` landed inside `src/` when VDE-13 and
-> VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. Per
-> [ARCHITECTURE §5c](ARCHITECTURE.md#5c-correctness--is-it-internally-true), a correctness breach is
-> never a threshold to be relaxed — the fix is to move the helper out of `src/`, and the incident
-> belongs in [§7, field corrections](ARCHITECTURE.md#7-field-corrections). It is left visible here
-> rather than tidied away, which is the same reason nothing else in these documents gets tidied
-> either.
+> [!NOTE]
+> **The bronze-immutability guard was red on `main` from 2026-07-31 to 2026-08-03, and it was right
+> to be.** A test-only `reset_tables()` helper containing `TRUNCATE bronze_raw, …` landed inside
+> `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written
+> to catch. The helper now lives in `tests/conftest.py`, its only caller, and the guard is green.
+> Per [ARCHITECTURE §5c](ARCHITECTURE.md#5c-correctness--is-it-internally-true) a correctness breach
+> is a fix, not a tolerance — and the part worth recording is that the detection cost nothing while
+> the three-day gap between knowing and acting cost everything the rule was meant to prevent. Both
+> are in [§7, field corrections](ARCHITECTURE.md#7-field-corrections). The incident stays; only the
+> defect is gone.
 
 </details>
 
@@ -463,18 +460,18 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#5](https://github.com/brunohart/cinema-ops-platform/pull/5) | VDE-15 | a re-run produces zero duplicates, proven against a throwaway Postgres | merged |
 | [#6](https://github.com/brunohart/cinema-ops-platform/pull/6) | VDE-14 | `bronze.quarantine` — rejected rows keep their `raw_payload`; the batch completes | merged |
 | [#7](https://github.com/brunohart/cinema-ops-platform/pull/7) | VDE-13 | file extractor with Pydantic schema-drift detection at the ingest boundary | merged |
-| [#8](https://github.com/brunohart/cinema-ops-platform/pull/8) | VDE-17 | `cinema_ops` clock skew — `SAFETY_LAG` overlap on incremental reads | in flight |
-| [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | in flight |
-| — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | in flight |
-| — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | in flight |
-| [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | in flight |
-| — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | in flight |
-| [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | in flight |
-| — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | in flight |
-| [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | in flight |
-| [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
-| [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
-| [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
+| [#8](https://github.com/brunohart/cinema-ops-platform/pull/8) | VDE-17 | `cinema_ops` clock skew — `SAFETY_LAG` overlap on incremental reads | merged |
+| [#9](https://github.com/brunohart/cinema-ops-platform/pull/9) | VDE-20 | consumer-group offsets committed after processing, not before | merged |
+| — | VDE-26 | gold fact grains stated out loud, written down, uniqueness proven | merged |
+| — | VDE-30 | gold schema tests — unique, not_null, relationships, accepted_values | merged |
+| [#27](https://github.com/brunohart/cinema-ops-platform/pull/27) | VDE-34 | structlog JSON logging — `batch_id` / `source` / `asset_key` on every stage line | merged |
+| — | VDE-38 | Hono agent-api over gold as role `api`; no SQL passthrough | merged |
+| [#42](https://github.com/brunohart/cinema-ops-platform/pull/42) | — | how the repository is built: plan on Opus, implement on Sonnet, verify on Opus, every phase recorded in an append-only ledger ([ADR-013](DECISIONS.md)) | merged |
+| — | VDE-49 | `docker compose up` from a fresh clone seeds the full stack: Dockerfile, seed service (Dagster transform path), dagster :3000, agent-tools :8787; `fct_booking_rows=2` B-GOLD; compose quickstart replaces the old `up -d db` one-liner | merged |
+| [#44](https://github.com/brunohart/cinema-ops-platform/pull/44) | VDE-50 | GitHub Actions CI — ruff, mypy, unit tests, integration + `dbt build` on ephemeral Postgres; fails on dbt test failure, not only run error | merged |
+| [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | merged |
+| [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | merged |
+| [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | merged |
 | — | VDE-57 | 3-minute Loom: rehearsable shot list (7 beats), two demo entry points, SLACK_WEBHOOK_URL in compose, PASS=10 proof | [#54](https://github.com/brunohart/cinema-ops-platform/pull/54) |
 
 
@@ -489,7 +486,7 @@ there was no issue to trace it to. The trail records the gap.
 
 ```
 ARCHITECTURE.md            what the system is — living, revised, never tidied
-DECISIONS.md               ADR-001…011, each ending in "what would change my mind"
+DECISIONS.md               ADR-001…016, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
 RUNBOOK.md                 three likely failures — symptom first, then what on-call does
 Dockerfile                 multi-stage image: installs Python deps + dbt + dagster
@@ -554,7 +551,8 @@ demo/
   inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
-tests/                     30 tests; all HTTP mocked, no live API calls
+tests/                     151 collected — 146 pass, 4 skip without a throwaway Postgres,
+                           1 integration deselected; all HTTP mocked, no live API calls
 ```
 
 </details>

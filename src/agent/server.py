@@ -34,7 +34,8 @@ from agent.limits import MAX_ROWS, effective_limit
 from agent.refuse import AuthorizedCall, Refusal, authorize
 from agent.site_performance import get_site_performance as get_limited_site_performance
 from agent.tokens import resolve_token
-from agent.tools import GET_SITE_PERFORMANCE, get_site_performance as get_scoped_site_performance
+from agent.tools import GET_SITE_PERFORMANCE
+from agent.tools import get_site_performance as get_scoped_site_performance
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8787

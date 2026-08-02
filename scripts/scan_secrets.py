@@ -646,7 +646,8 @@ def _run_self_check() -> None:
         reason = _classify_tier_b(mb.group("value"))
         if reason is None:
             failures.append(
-                f"account-check FAIL: {line!r} → unaccounted (expected accounted as {expected_label!r})"
+                f"account-check FAIL: {line!r} → unaccounted "
+                f"(expected accounted as {expected_label!r})"
             )
 
     if failures:

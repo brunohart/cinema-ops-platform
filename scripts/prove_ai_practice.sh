@@ -260,7 +260,7 @@ import os, re, sys
 
 ARTEFACT = "docs/2026-08-02-vde-58-ai-first-practice.md"
 HEADING = "## How this was built with AI"
-BEFORE = "## What I deliberately did not build"
+BEFORE = "## What I would do differently at circuit scale — and what I deliberately did not build"
 AFTER = "## Below the fold — the long form"
 
 lines = open("README.md").read().splitlines()

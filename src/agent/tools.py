@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Sequence
 from datetime import date
-from typing import Any, Sequence
+from typing import Any
 
 import psycopg
 from psycopg.rows import dict_row
 
 from agent.catalog import GET_SITE_PERFORMANCE  # noqa: F401 — re-exported for server.py
-
 
 # Token-scoped HTTP tool (VDE-41 / VDE-45). Kept alongside the VDE-48 red-team
 # surface; the Bearer tools server binds site scope before calling this.

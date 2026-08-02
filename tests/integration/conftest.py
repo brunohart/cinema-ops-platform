@@ -8,6 +8,7 @@ dependence on a pre-provisioned local database.
 from __future__ import annotations
 
 import os
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -22,6 +23,13 @@ except ImportError:  # older testcontainers
 from stores.postgres import apply_schema_files
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# ``test_medallion_dag`` imports ``orchestration.dbt_assets``, which builds a
+# ``DbtCliResource``; that validates the dbt binary at import time. Without dbt on
+# PATH the module raises during *collection*, which fails the whole run — including
+# ``pytest -m "not integration"``, where these tests were never going to run. A
+# deselected test must not be able to break a suite it is excluded from.
+collect_ignore = [] if shutil.which("dbt") else ["test_medallion_dag.py"]
 
 # Bronze DDL the silver sources need — same set docker-compose applies at init,
 # minus gold fact-grain DDL (dbt builds gold tables).

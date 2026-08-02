@@ -4,9 +4,14 @@
 # Ten checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
 # Ends with PASS=10 and exits 0 only when all ten pass.
 #
-# VDE-58 added an eighth above-fold anchor ("## How this was built with AI", between
-# "## What I deliberately did not build" and "## Below the fold — the long form"); check 1
+# VDE-58 added an eighth above-fold anchor ("## How this was built with AI", between the
+# deliberately-did-not-build section and "## Below the fold — the long form"); check 1
 # and check 8 below were updated to match — no other check's semantics changed.
+#
+# 2026-08-03: VDE-56 renamed that preceding section to "## What I would do differently at
+# circuit scale — and what I deliberately did not build" but left the old title in the
+# anchor list, so this script asserted a heading that no longer existed and had been
+# failing on main since. Anchors are named in exactly one place now — here.
 #
 #   ./scripts/prove_readme_structure.sh
 #
@@ -34,7 +39,6 @@ anchors = [
     "## 60-second quickstart",
     "## The agent interface, and why it is safe",
     "## What I would do differently at circuit scale — and what I deliberately did not build",
-    "## What I deliberately did not build",
     "## How this was built with AI",
     "## Below the fold — the long form",
 ]

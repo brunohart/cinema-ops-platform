@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-08-01
-**Revision count:** 7
+**Last revised:** 2026-08-03
+**Revision count:** 10
 
 ---
 
@@ -484,6 +484,111 @@ Format:
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
 
+### 2026-08-03 · [CI] · the README badge said green while `main` was red
+
+**Predicted:**   VDE-50 put `ruff`, `mypy`, unit, integration and `dbt build` behind CI, and the
+README carries the workflow's status badge. The implied claim is that `main` is green.
+
+**Observed:**    The `lint, typecheck, unit tests` job had been failing on `main` on every run —
+`ruff check .` exiting 1 with 24 findings, plus the two VDE-11 failures. The `integration + dbt build`
+job was green throughout, which is why the repository still felt healthy.
+
+**Why the gap:**  Two causes, and the second is the interesting one. The dev extra pinned
+`ruff>=0.6` with no upper bound, so CI resolved `ruff==0.16.1` — a release whose new rules
+(`UP017`, `UP035`, stricter `F401`) flagged 24 pre-existing lines. Nothing in the repository changed;
+the linter's opinions did. An unbounded lint dependency means the gate can go red on a schedule set by
+someone else, and a gate that fails for reasons unrelated to the change stops being read — which is
+how the two genuine VDE-11 failures sat underneath it unnoticed for three days.
+
+**Changed:**      All 24 findings fixed (21 by `ruff --fix`, three long string literals wrapped by
+hand, two dead imports removed after confirming `psycopg` was already imported under `TYPE_CHECKING`
+and `GET_SITE_PERFORMANCE` was genuinely unused in `refuse.py`). `ruff` upper-bounded to `<0.17` in
+`pyproject.toml`, with the reason stated in place: raising the bound is its own commit that fixes the
+new findings, never a side effect of installing.
+
+**Cost:**         Three days of a red `main` behind a green-looking badge. The badge was accurate about
+the workflow and misleading about the repository, because it renders the most recent run of a workflow
+whose other job was passing. The real cost is the one this section exists to name: a check nobody
+believes is a check nobody reads.
+
+---
+
+### 2026-08-03 · [header] · a revision landed without the header being bumped
+
+**Predicted:**   Ritual step 5 (now step 6): every revision bumps `Last revised` and `Revision count`.
+
+**Observed:**    The header read `Last revised: 2026-08-01 · Revision count: 7` while section 10
+carried a decision row dated 2026-08-02 and the file's own git history showed a commit that day. One
+revision was made without the step that records it.
+
+**Why the gap:**  The step is last in the list, so it is the one that gets dropped when the edit felt
+small — and a decision-log row *is* small. Size is exactly the wrong criterion: the header is what
+tells a reader whether the document is current, so an unbumped header on a small edit misreports the
+same way it would on a large one.
+
+**Changed:**      Header corrected to `2026-08-03` / `9` — 7, plus the unrecorded 2026-08-02 revision,
+plus this one. The count is restated here rather than quietly adjusted, because a revision counter
+edited without explanation is worth less than no counter.
+
+**Cost:**         Nothing yet. Named because the alternative was to fix it silently, which is the
+behaviour CLAUDE.md's 2026-08-01 entry already caught once.
+
+---
+
+### 2026-08-03 · [section 9] · the all-predicted rule fired on Day 4 and nothing happened
+
+**Predicted:**   Section 9 states that if every row in section 2 is still `PREDICTED` by end of Day 4,
+that is itself a finding, to be investigated and logged here.
+
+**Observed:**    Day 4 was 2026-08-02. All five rows in section 2 are still `PREDICTED`. No
+investigation was logged. The rule fired and was not honoured — found by an audit of this document
+against its own section 9, not by the ritual that was supposed to catch it.
+
+**Why the gap:**  The rule has a trigger and no owner-action attached to a specific day. The daily
+ritual asks four questions about what happened *today*; none of them asks whether a standing
+forcing-condition has now come due. A condition nobody is scheduled to evaluate is a comment, not a
+control — the same failure the document argues against in section 5c, arriving in the document's own
+machinery rather than in the pipeline.
+
+**The finding itself:** the honest answer is the first branch of the rule, not the second. Nothing in
+section 2 has been genuinely exercised. The four failure modes are all *source-side* — a live 429, a
+real upstream schema change, a genuinely late transaction, a broker redelivery — and every source in
+this build is either mocked (TMDB, per CLAUDE.md's no-live-HTTP rule) or synthetic (the landing files,
+`cinema_ops`, the ticketing topic). The detections exist and are unit-tested; what has not happened is
+a source betraying the system on its own initiative. So the statuses are correct and the *build* is
+what is incomplete, which is a different and more useful statement than "the rows are stale."
+
+**Changed:**      Section 9 gains an explicit evaluation step (below) so the condition is checked on a
+date rather than in principle. Section 8 gains Q6, which is the question this investigation raises:
+what would it take to exercise a failure mode for real rather than in a fixture.
+
+**Cost:**         One day of the rule being silently unenforced. Caught before the document was read
+by anyone relying on it.
+
+---
+
+### 2026-08-03 · [`src/`] · test-only `TRUNCATE` helper in the package → VDE-11 guard red for three days
+
+**Predicted:**   CLAUDE.md layer rule one: bronze is append-only, no UPDATE, no DELETE, ever — and the
+VDE-11 guard enforces it by refusing any bronze mutation inside `src/`.
+
+**Observed:**    `reset_tables()`, containing `TRUNCATE bronze_raw, bronze_quarantine, watermarks,
+pipeline_runs`, landed in `src/extractors/postgres.py` when VDE-13 and VDE-15 merged. The guard caught
+it correctly and `main` carried two red tests from 2026-07-31 to 2026-08-03.
+
+**Why the gap:**  The helper was written for the VDE-15 idempotency fixture and put next to the schema
+DDL it pairs with, which is the intuitive place and the wrong one. A docstring saying "used between
+tests" is not a boundary; the function was importable from production code paths regardless. The
+guard was right and the reasoning that placed the file was wrong.
+
+**Changed:**      `reset_tables()` moved to `tests/conftest.py`, its only caller, with a comment naming
+the guard. `src/extractors/postgres.py` no longer mutates bronze. Suite: 146 passed, 0 failed;
+`./scripts/prove-bronze-immutable.sh` exits 0.
+
+**Cost:**         Three days of a red guard on `main`, defended in the README rather than fixed. The
+detection cost nothing — it worked on the day the helper landed. What it cost was the interval between
+knowing and acting, which is the part a correctness breach is not supposed to have (section 5c).
+
 ### 2026-08-01 · [docker, sql] · CREATE TABLE IF NOT EXISTS on conflicting schema → silent no-op, then failed INSERT
 
 **Predicted:**   `sql/gold/003_agent_redteam_fixture.sql` at initdb position 052 would create a bigint-keyed `gold.dim_film` and seed it with rows for the red-team proof.
@@ -511,6 +616,7 @@ go and find a question rather than to celebrate.
 | Q3 | How late is "late" for `cinema_ops` — what overlap window is actually needed? | `SAFETY_LAG` is currently a 5-minute guess (section 2c); too short loses data, too long costs reads | measure max observed source transaction duration (commit − business time) over a real operating day; set lag above that max | open — guess committed, measurement pending |
 | Q4 | What is the real drop cadence for landing files? | the 6 h freshness promise in section 5a is `est.` with no measurement behind it | log file mtimes for a week and take the 95th percentile gap | open |
 | Q5 | Where does "expected row count" come from for the completeness check? | a completeness SLA with no independent expectation to compare against is unmeasurable | source-side count query per batch window, or a manifest from the producer | open |
+| Q6 | What would it take to exercise one section 2 failure mode for real, not in a fixture? | every row is `PREDICTED` because no source has yet betrayed the system on its own initiative; a detection that has only ever fired against a mock is tested, not proven | pick the cheapest — replay a real TMDB backfill against the live API off-CI until a 429 lands, or hand the landing-file producer a genuinely drifted file and watch the quarantine path | open |
 
 ---
 
@@ -527,7 +633,9 @@ forcing-function into my workflow so that the architecture can evolve totally.
    caught, in section 7.
 3. Did I learn something that makes a section 2 row wrong? → flip to `DISPROVEN`, rewrite the row, log why.
 4. Did today raise a question I can't answer? → section 8.
-5. Bump `Last revised` and `Revision count` in the header. Commit the file **on its own**, with a
+5. Is a forcing condition below due today? → evaluate it now and log the result in section 7, even
+   when the result is "checked, still fine." A condition nobody is scheduled to evaluate is a comment.
+6. Bump `Last revised` and `Revision count` in the header. Commit the file **on its own**, with a
    message naming what changed:
    `docs(arch): observed 429 on TMDB backfill — backoff insufficient at page 40+`
 
@@ -541,6 +649,9 @@ These are the reinforcing function. They are rules with teeth, not intentions.
 - **The all-predicted rule.** If every row in section 2 is still `PREDICTED` by end of Day 4, something is
   wrong — either nothing is being genuinely exercised, or failures are occurring and not being
   noticed. Either is a finding. Investigate it and log the investigation in section 7.
+  *Evaluated on the dated day, as step 6 of the daily ritual — not "when it comes up." This rule fired
+  on Day 4 and went unhonoured for a day because nothing was scheduled to ask it (section 7,
+  2026-08-03). A forcing condition with no evaluation step is a comment.*
 - **The empty-questions rule.** Section 8 has a floor of three open questions. Answering one obliges finding
   another. The floor is what stops the document from calcifying into confidence.
 - **The recital test.** I close the file and state all four failure modes aloud from memory, plus the

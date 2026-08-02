@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from agent.catalog import (
@@ -133,7 +133,7 @@ DEMO_TOKENS: dict[str, AgentToken] = {
         label="cinema-ops-demo-2026-08-01",
         site_ids=(1, 2),
         allowed_tools=(GET_SITE_PERFORMANCE, GET_FILM_ATTENDANCE, LIST_SESSIONS),
-        expires_at=datetime(2026, 8, 31, 0, 0, 0, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 8, 31, 0, 0, 0, tzinfo=UTC),
         revoked_at=None,
     ),
     _EXPIRED_TOKEN_DIGEST: AgentToken(
@@ -141,7 +141,7 @@ DEMO_TOKENS: dict[str, AgentToken] = {
         site_ids=(1, 2),
         allowed_tools=(GET_SITE_PERFORMANCE, GET_FILM_ATTENDANCE, LIST_SESSIONS),
         # Expired on 2026-07-11 — one day after anchor date
-        expires_at=datetime(2026, 7, 11, 0, 0, 0, tzinfo=timezone.utc),
+        expires_at=datetime(2026, 7, 11, 0, 0, 0, tzinfo=UTC),
         revoked_at=None,
     ),
 }
@@ -169,9 +169,9 @@ def resolve_demo_token(
     if token is None:
         return None
 
-    clock = now if now is not None else datetime.now(timezone.utc)
+    clock = now if now is not None else datetime.now(UTC)
     if clock.tzinfo is None:
-        clock = clock.replace(tzinfo=timezone.utc)
+        clock = clock.replace(tzinfo=UTC)
 
     if token.revoked_at is not None:
         return None

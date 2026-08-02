@@ -20,7 +20,12 @@ module_name = "orchestration.definitions"
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.6",
+    # Upper-bounded deliberately. An unpinned linter is a dependency on a future
+    # release's opinions: ruff 0.16 added rules that turned main's CI red without a
+    # line of code changing. A lint gate that can fail on someone else's schedule
+    # gates nothing. Raise the bound as its own commit, with the new findings fixed
+    # in that commit — never as a side effect of installing.
+    "ruff>=0.6,<0.17",
     "mypy>=1.11",
     "testcontainers[postgres]>=4.0",
 ]

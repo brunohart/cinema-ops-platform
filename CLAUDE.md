@@ -66,3 +66,13 @@ does not belong. Prose lives in ARCHITECTURE.md and DECISIONS.md; this file is r
   re-indented two continuation lines of the 2026-07-30 entry from two spaces to one. A whitespace-only
   change to a historical line is the smallest possible version of the thing the section above forbids,
   and it is exactly the size of edit that gets waved through. Restored, in its own commit, named here.
+- 2026-08-03 — naming the contradiction this file was born with. The rule above says a rule is written
+  the moment a mistake proves it necessary, never speculatively. Every rule in the 2026-07-30 seed was
+  speculative by that definition: the entry itself says they were *lifted from* ARCHITECTURE.md and
+  DECISIONS.md, which is inheritance, not incident. So the file opened by breaking its own most
+  distinctive rule, and said so nowhere. The rules are kept — they encode real constraints and two of
+  them have since caught real mistakes — but they are hereby marked as what they are: a provisional
+  seed, carrying no evidence until an incident supplies it. The discipline starts at the 2026-07-31
+  entry, which is the first rule here written from a failure rather than from a document. A file that
+  claims a standard it did not meet on day one is worth less than one that meets a lower standard
+  honestly; this entry is the difference.

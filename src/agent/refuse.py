@@ -15,12 +15,13 @@ Refuse — with a reason the agent can act on — when:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Literal, Mapping, Sequence
+from datetime import UTC, date, datetime, timedelta
+from typing import Any, Literal
 
+from agent.catalog import IMPLEMENTED_TOOLS
 from agent.tokens import AgentToken
-from agent.catalog import GET_SITE_PERFORMANCE, IMPLEMENTED_TOOLS
 
 # Stated guess (ARCHITECTURE §5): operational gold retained for agent tools.
 # Marked est. — move it when a real retention policy lands; change goes in §7.
@@ -122,7 +123,9 @@ def validate_params(raw: Mapping[str, Any] | None) -> ToolParams | Refusal:
             return Refusal(
                 code="schema_validation",
                 reason="Param siteIds was provided but empty.",
-                suggestion="Retry with at least one siteId, or omit siteIds to use the token scope.",
+                suggestion=(
+                    "Retry with at least one siteId, or omit siteIds to use the token scope."
+                ),
             )
 
     date_from: date | None = None
@@ -211,7 +214,7 @@ def check_retention(
     if params.date_from is None and params.date_to is None:
         return None
 
-    clock = today if today is not None else datetime.now(timezone.utc).date()
+    clock = today if today is not None else datetime.now(UTC).date()
     floor = clock - timedelta(days=retention_days)
 
     earliest = params.date_from or params.date_to

@@ -58,15 +58,6 @@ def apply_schema(conn: psycopg.Connection) -> None:
     conn.commit()
 
 
-def reset_tables(conn: psycopg.Connection) -> None:
-    """Truncate all pipeline tables — used between tests on a throwaway DB."""
-    with conn.cursor() as cur:
-        cur.execute(
-            "TRUNCATE bronze_raw, bronze_quarantine, watermarks, pipeline_runs"
-        )
-    conn.commit()
-
-
 class PostgresBronzeStore:
     """Append-only bronze landing. Idempotent merge on ``_payload_hash``."""
 

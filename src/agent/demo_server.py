@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from agent.catalog import IMPLEMENTED_TOOLS, TOOL_DESCRIPTIONS, TOOL_COLUMNS
+from agent.catalog import IMPLEMENTED_TOOLS, TOOL_COLUMNS, TOOL_DESCRIPTIONS
 from agent.demo_data import resolve_demo_token, rows_for
 from agent.refuse import AuthorizedCall, Refusal, authorize
 

@@ -1,19 +1,22 @@
 #!/usr/bin/env node
-// seed-linear.mjs — deterministically seed the Vista DE sprint backlog into Linear.
+// seed-linear.mjs — deterministically seed the build backlog into Linear.
 //
-// The sprint HTML is the single source of truth: this script reads the DAYS array
+// The build-plan HTML is the single source of truth: this script reads the DAYS array
 // and the EXPAND how-panels straight out of it, so the backlog can never drift from
 // the plan it came from. Re-runnable: issues whose title already exists in the
 // project are skipped, so a second run is a no-op rather than a duplication.
 //
+// The plan file is an input, not a repository artefact: pass --html explicitly.
+// There is no default path, because a default that resolves only on the author's
+// machine is the kind of green run that does not survive a clean clone.
+//
 // Usage:
-//   node scripts/seed-linear.mjs --dry-run              # parse + render, no network
-//   LINEAR_API_KEY=lin_api_xxx node scripts/seed-linear.mjs
-//   ... --html /path/to/vista-de-sprint_2.html          # override source (default: ~/Downloads)
+//   node scripts/seed-linear.mjs --html ./plan.html --dry-run   # parse + render, no network
+//   LINEAR_API_KEY=… node scripts/seed-linear.mjs --html ./plan.html
 //   ... --limit 3                                        # only the first N (smoke test)
 //   ... --json                                           # print the rendered backlog as JSON
 //
-// Mapping (locked with Bruno on Day 0):
+// Mapping:
 //   title       = task text, tags stripped
 //   description = Model · Tool · Why · The move · Proof, as markdown
 //   label       = day-0 … day-7
@@ -21,8 +24,6 @@
 //   project     = cinema-ops-platform    · team = VDE    · one shared cycle
 
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(`--${name}`);
@@ -31,12 +32,12 @@ const opt  = (name, def) => { const i = argv.indexOf(`--${name}`); return i >= 0
 const DRY   = flag('dry-run');
 const JSONO = flag('json');
 const LIMIT = opt('limit') ? parseInt(opt('limit'), 10) : Infinity;
-const HTML  = opt('html', path.join(os.homedir(), 'Downloads', 'vista-de-sprint_2.html'));
+const HTML  = opt('html');
 const KEY   = process.env.LINEAR_API_KEY;
 
 const TEAM_NAME    = 'VDE';
 const PROJECT_NAME = 'cinema-ops-platform';
-const CYCLE_NAME   = 'Vista DE Sprint — Day 0–7';
+const CYCLE_NAME   = 'Build sprint — Day 0–7';
 
 // ---------- extract the JS data blocks from the HTML (the data IS JavaScript) ----------
 function extract(html, name, open, close, boundary) {
@@ -84,6 +85,12 @@ function description(e, modelTitles) {
 
 // ---------- build the backlog ----------
 function buildBacklog() {
+  if (!HTML) {
+    throw new Error('--html <path-to-plan.html> is required (no default; see the header comment)');
+  }
+  if (!fs.existsSync(HTML)) {
+    throw new Error(`plan file not found: ${HTML}`);
+  }
   const html = fs.readFileSync(HTML, 'utf8');
   const EXPAND = extract(html, 'EXPAND', '{', '}', 'MODEL_TITLES');
   const MODEL_TITLES = extract(html, 'MODEL_TITLES', '{', '}', 'HOW PANEL');

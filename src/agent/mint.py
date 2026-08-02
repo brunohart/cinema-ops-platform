@@ -7,8 +7,8 @@ put it in Authorization: Bearer — it cannot be recovered later.
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
-from typing import Sequence
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 
 import psycopg
 
@@ -35,9 +35,9 @@ def mint_token(
     digest = hash_token(token)
     exp = expires_at
     if exp is None:
-        exp = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+        exp = datetime.now(UTC) + timedelta(hours=ttl_hours)
     if exp.tzinfo is None:
-        exp = exp.replace(tzinfo=timezone.utc)
+        exp = exp.replace(tzinfo=UTC)
 
     with conn.cursor() as cur:
         cur.execute(

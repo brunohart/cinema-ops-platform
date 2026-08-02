@@ -13,9 +13,10 @@ must not present an empty intersection as a successful complete answer.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Sequence
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import psycopg
@@ -60,7 +61,6 @@ def resolve_token(
     now: datetime | None = None,
 ) -> AgentToken | None:
     """Look up a live (unexpired, unrevoked) token by plaintext bearer value."""
-    import psycopg  # noqa: F811 — kept out of module scope to avoid eager import
     from psycopg.rows import dict_row
 
     if not plaintext:
@@ -81,14 +81,14 @@ def resolve_token(
 
     expires_at = row["expires_at"]
     if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires_at = expires_at.replace(tzinfo=UTC)
     revoked_at = row["revoked_at"]
     if revoked_at is not None and revoked_at.tzinfo is None:
-        revoked_at = revoked_at.replace(tzinfo=timezone.utc)
+        revoked_at = revoked_at.replace(tzinfo=UTC)
 
-    clock = now if now is not None else datetime.now(timezone.utc)
+    clock = now if now is not None else datetime.now(UTC)
     if clock.tzinfo is None:
-        clock = clock.replace(tzinfo=timezone.utc)
+        clock = clock.replace(tzinfo=UTC)
 
     if revoked_at is not None:
         return None

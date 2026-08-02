@@ -49,9 +49,9 @@ freshness policies and lineage hang off those declarations rather than off a tas
 integration means my dbt models arrive as first-class assets rather than as one opaque `dbt run`
 step, which is what keeps section 5's per-asset promises addressable.
 
-**Consequences** Smaller ecosystem and a smaller hiring pool; Airflow appears in far more job ads,
-and choosing Dagster means I am not demonstrating the more commonly listed tool. I accept that
-because I would rather be able to answer *why* than claim familiarity with the more popular option.
+**Consequences** A smaller ecosystem: fewer engineers already fluent in it, fewer worked examples
+when something breaks at 2am, and fewer off-the-shelf integrations than Airflow's operator library.
+On a team that cost is real and recurring, and it is paid by whoever is on call rather than by me.
 It is also a heavier local footprint than a bare scheduler, and the asset model requires thinking in
 declarations before writing any orchestration code — a real cost on day one that pays back by day
 four.
