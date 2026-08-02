@@ -378,10 +378,13 @@ for word in pii_words:
 print("  ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names")
 PY
 
+# ── check 8: section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words; no stale claims ─
+echo "== 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words; no stale unbuilt-claims =="
 # ── check 8: section 6 ≥ 4 bullets; above-fold ≤ 1300 words ─────────────────
 echo "== 8. section 6 ≥ 4 bullets; above-fold ≤ 1300 words =="
 python3 - <<'PY' || exit 1
 import sys, re
+from pathlib import Path
 
 lines = open("README.md").read().splitlines()
 
@@ -404,6 +407,56 @@ if bullet_count < 4:
     print(f"  FAIL — section 6 has {bullet_count} bullet(s), need ≥ 4", file=sys.stderr)
     sys.exit(1)
 
+# Staleness guard — same VDE-53/VDE-55 lesson made mechanical for README's own
+# "deliberately did not build" section: a path that has shipped on disk paired
+# with the stale phrase that would be a lie if it still appeared here.
+sec6_joined = "\n".join(sec6_text)
+shipped = [
+    ("mcp/src/mcp.ts", r'MCP server\b.*not\b|MCP.*not (yet )?built'),
+    ("dbt/models/gold/fct_booking.sql", r'gold dbt transforms.*not yet written|dbt transforms.*not yet'),
+    ("dbt/models/silver/stg_bookings.sql", r'silver.*dbt transforms.*not yet written'),
+    ("src/orchestration/checks.py", r'Dagster asset checks.*not (yet )?built'),
+    ("evals/mcp.yaml", r'evaluation layer.*(does not|doesn.t) exist'),
+    ("agent-api/", r'agent-api.*not (yet )?built'),
+]
+
+root = Path(".")
+leaked = []
+for path, stale_pattern in shipped:
+    if (root / path).exists() and re.search(stale_pattern, sec6_joined, re.I):
+        leaked.append((path, stale_pattern))
+
+if leaked:
+    for path, pattern in leaked:
+        print(f"  FAIL — {path} exists on disk but README section 6 claims it "
+              f"unbuilt (matched {pattern!r})", file=sys.stderr)
+    sys.exit(1)
+
+denylist_terms = ["MCP", "dbt", "asset check", "eval suite", "agent-api"]
+for term in denylist_terms:
+    pattern = re.escape(term) + r'[^.]{0,60}\bnot (yet )?built\b'
+    if re.search(pattern, sec6_joined, re.I):
+        print(f"  FAIL — README section 6 claims '{term}' is unbuilt, but it "
+              f"has shipped", file=sys.stderr)
+        sys.exit(1)
+
+# The VDE-55 bug this check exists to catch didn't say "not built" at all — it
+# named the VDE-48 fixture as the whole evaluation layer without acknowledging
+# the MCP boundary eval that had since shipped alongside it. Catch that shape
+# directly: a bullet naming "evaluation layer" + "VDE-48" that never mentions
+# the MCP eval fixture is describing a narrower build than actually exists.
+if (root / "evals/mcp.yaml").exists() or (root / "scripts/prove_mcp_eval.sh").exists():
+    eval_bullet = re.search(r'evaluation layer[^\n]{0,300}VDE-48[^\n]{0,300}', sec6_joined, re.I)
+    if eval_bullet and not re.search(
+        r'evals/mcp\.yaml|prove_mcp_eval|MCP boundary eval|redteam\.yaml',
+        eval_bullet.group(0), re.I,
+    ):
+        print("  FAIL — README section 6 names the VDE-48 fixture as the "
+              "evaluation layer without acknowledging the shipped MCP eval "
+              "(evals/mcp.yaml, scripts/prove_mcp_eval.sh)", file=sys.stderr)
+        sys.exit(1)
+
+# Word count of sections 1–6 (H1 through the line before ## Below the fold)
 # Word count above the fold (H1 through the line before ## Below the fold)
 above_fold = lines[sec1:fold]
 above_fold_text = "\n".join(above_fold)
@@ -412,6 +465,8 @@ if word_count > 1300:
     print(f"  FAIL — above-fold is {word_count} words, limit is 1300", file=sys.stderr)
     sys.exit(1)
 
+print(f"  ok   — section 6 has {bullet_count} bullets, no stale unbuilt-claims; "
+      f"sections 1–6 are {word_count} words (≤ 1300)")
 print(f"  ok   — section 6 has {bullet_count} bullets; above-fold is {word_count} words (≤ 1300)")
 PY
 

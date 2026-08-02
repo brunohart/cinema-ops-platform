@@ -81,6 +81,11 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 ### At circuit scale, these break first
 
+- **A continuous, model-graded adversarial evaluation suite standing on every PR** — the VDE-48 synopsis-injection red-team fixture and the MCP boundary eval (`evals/mcp.yaml`, `evals/redteam.yaml`, proved by `scripts/prove_mcp_eval.sh`) are deterministic and built; a broader suite that grades novel adversarial prompts on every change, rather than a fixed fixture, is not.
+- **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
+- **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
+- **No real operator data** — this holds synthetic data and is not trying to become a product.
+- **The bronze-immutability guard is currently red on `main`, and it is right to be** — a test-only `reset_tables()` helper containing `TRUNCATE` landed inside `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. The fix is to move the helper out of `src/`; the incident stays visible rather than being tidied away.
 Vista's customers run hundreds of sites and years of transactions. The numbers below are mine, and specific enough to be wrong.
 
 - **`fct_booking` past ~50M rows.** Postgres is a row store ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)); somewhere in the tens of millions the gold aggregates behind a tool call stop being index scans. The move is a columnar engine behind the same dbt models, not a bigger instance.
@@ -120,6 +125,8 @@ script can check rather than something you have to take my word for.
   and a hook refuses to let a repo-changing run finish unrecorded.
 
 `./scripts/prove_ai_practice.sh` — [recorded](docs/2026-08-02-vde-58-ai-first-practice.md).
+
+*The problem this repository exists to answer, the four failure modes and how each is handled, and the governance model behind it, argued end to end: [`docs/2026-08-02-vde-55-case-study.md`](docs/2026-08-02-vde-55-case-study.md).*
 
 ---
 
@@ -182,6 +189,7 @@ pytest -q                       # the whole suite
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
+| case study — six section anchors, word band, operator-language test, staleness guard against what has actually shipped | `./scripts/prove_case_study.sh` | [recorded](docs/2026-08-02-vde-55-case-study.md) — `PASS=10` |
 | section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
 | spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
 | 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
@@ -412,6 +420,7 @@ incident. Same problem; the only variable is when you looked.
 | [docs/the-read-path.md](docs/the-read-path.md) | the essay this repository argues for | *Theatrical Research · 01* |
 | [docs/thesis-map.md](docs/thesis-map.md) | the join between the two | if a paragraph in the essay has no row in the map, it is an opinion and should either be cut or be built |
 | [docs/agent-ledger/](docs/agent-ledger/) | what the agents that build this repository have learned | append-only and hash-chained per run; every phase reads it before it plans and writes to it before it hands over, so a trap is hit once rather than every run |
+| [docs/2026-08-02-vde-55-case-study.md](docs/2026-08-02-vde-55-case-study.md) | the problem, the four failure modes and how each is handled, the governance model — argued end to end | proof command run inline; section 6 checked against what is actually on disk rather than restated from memory |
 
 Four mechanisms are doing real work across all of them:
 
