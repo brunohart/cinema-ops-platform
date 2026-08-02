@@ -4,6 +4,10 @@
 # Nine checks, each printing "  ok   — …" on success or "  FAIL — …" on first failure.
 # Ends with PASS=9 and exits 0 only when all nine pass.
 #
+# VDE-58 added an eighth above-fold anchor ("## How this was built with AI", between
+# "## What I deliberately did not build" and "## Below the fold — the long form"); check 1
+# and check 8 below were updated to match — no other check's semantics changed.
+#
 #   ./scripts/prove_readme_structure.sh
 #
 # Needs bash and python3 only. No pytest, no network, no docker.
@@ -18,8 +22,8 @@ ARCH="ARCHITECTURE.md"
 pass() { echo "  ok   — $1"; }
 fail() { echo "  FAIL — $1" >&2; exit 1; }
 
-# ── check 1: seven anchors exist exactly once each and in file order ──────────
-echo "== 1. seven section anchors exist once each, in order =="
+# ── check 1: eight anchors exist exactly once each and in file order ─────────
+echo "== 1. eight section anchors exist once each, in order =="
 python3 - <<'PY' || exit 1
 import sys, re
 
@@ -30,6 +34,7 @@ anchors = [
     "## 60-second quickstart",
     "## The agent interface, and why it is safe",
     "## What I deliberately did not build",
+    "## How this was built with AI",
     "## Below the fold — the long form",
 ]
 
@@ -54,7 +59,7 @@ for i in range(len(anchors) - 1):
               f"must precede {anchors[i+1]!r} (line {positions[anchors[i+1]]+1})", file=sys.stderr)
         sys.exit(1)
 
-print("  ok   — all seven anchors present once each, in order")
+print("  ok   — all eight anchors present once each, in order")
 PY
 
 # ── check 2: one paragraph, one sentence-ending period, ≤ 45 words ───────────
@@ -372,8 +377,8 @@ for word in pii_words:
 print("  ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names")
 PY
 
-# ── check 8: section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words ───────────────
-echo "== 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words =="
+# ── check 8: section 6 ≥ 4 bullets; above-fold ≤ 1300 words ─────────────────
+echo "== 8. section 6 ≥ 4 bullets; above-fold ≤ 1300 words =="
 python3 - <<'PY' || exit 1
 import sys, re
 
@@ -398,15 +403,15 @@ if bullet_count < 4:
     print(f"  FAIL — section 6 has {bullet_count} bullet(s), need ≥ 4", file=sys.stderr)
     sys.exit(1)
 
-# Word count of sections 1–6 (H1 through the line before ## Below the fold)
+# Word count above the fold (H1 through the line before ## Below the fold)
 above_fold = lines[sec1:fold]
 above_fold_text = "\n".join(above_fold)
 word_count = len(above_fold_text.split())
 if word_count > 1300:
-    print(f"  FAIL — sections 1–6 are {word_count} words, limit is 1300", file=sys.stderr)
+    print(f"  FAIL — above-fold is {word_count} words, limit is 1300", file=sys.stderr)
     sys.exit(1)
 
-print(f"  ok   — section 6 has {bullet_count} bullets; sections 1–6 are {word_count} words (≤ 1300)")
+print(f"  ok   — section 6 has {bullet_count} bullets; above-fold is {word_count} words (≤ 1300)")
 PY
 
 echo ""
