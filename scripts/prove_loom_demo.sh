@@ -271,7 +271,7 @@ PY
 # ── check 5: demo scripts compile; imports; no postgresql://; inject.py rules ─
 echo "== 5. demo/*.py: py_compile, agent.* imports only, no postgresql://, inject.py rules =="
 python3 - <<'PY' || exit 1
-import sys, ast, pathlib, subprocess
+import sys, ast, pathlib, subprocess, re
 
 errors = []
 

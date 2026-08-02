@@ -428,7 +428,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 | [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
-| — | VDE-57 | 3-minute Loom: rehearsable shot list (7 beats), two demo entry points, SLACK_WEBHOOK_URL in compose, PASS=10 proof | in flight |
+| — | VDE-57 | 3-minute Loom: rehearsable shot list (7 beats), two demo entry points, SLACK_WEBHOOK_URL in compose, PASS=10 proof | [#54](https://github.com/brunohart/cinema-ops-platform/pull/54) |
 
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
