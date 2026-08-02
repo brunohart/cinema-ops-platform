@@ -91,6 +91,28 @@ Stated plainly, because a gap I have named is worth more than a gap a reviewer f
 
 ---
 
+## How this was built with AI
+
+The claim here is not *I used AI* — it is *there is a practice*, and a practice is something a
+script can check rather than something you have to take my word for.
+
+- **Spec before prompting.** Commit one (`4f05bb5`, 2026-07-30) is `ARCHITECTURE.md`,
+  `DECISIONS.md` and toolchain config — no code, nothing under `src/`, `dbt/`, `sql/`, `tests/` or
+  `scripts/`. The first pipeline code landed a day later. Prompting ran against that spec, not a
+  blank page.
+- **Tests read the implementation before they were written.** Paired by basename against the code
+  they test, no test's own first commit precedes the implementation's.
+- **Plan, implement, verify — every issue.** Opus plans (read-only), Sonnet implements, Opus
+  verifies (read-only); each phase appends its lesson to
+  [`docs/agent-ledger/`](docs/agent-ledger/) before handing over, so the next run starts past traps
+  the last one already hit.
+- **Gates the model could not talk past.** `ruff`, `mypy`, `pytest` and `dbt` test failures fail CI,
+  and a hook refuses to let a repo-changing run finish unrecorded.
+
+`./scripts/prove_ai_practice.sh` — [recorded](docs/2026-08-02-vde-58-ai-first-practice.md).
+
+---
+
 ## Below the fold — the long form
 
 <div align="center">
@@ -150,6 +172,7 @@ pytest -q                       # the whole suite
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
+| spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
 | 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
 
 > [!WARNING]
@@ -344,6 +367,10 @@ into every delegation, the model that *actually* ran each phase is recorded from
 input rather than the agent's word, and a run that changed the repository cannot finish while any of
 the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
 with nothing installed but Python and git.
+
+That the spec preceded the code, and not only that the pipeline exists, is what
+[`./scripts/prove_ai_practice.sh`](docs/2026-08-02-vde-58-ai-first-practice.md) checks against git
+history directly, above the fold.
 
 </details>
 
