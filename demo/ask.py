@@ -3,7 +3,7 @@
 Calls get_site_revenue for site_key=10, date_key=20240701.
 Prints json.dumps of the outcome. Exits 0 only if outcome == 'ok'.
 AGENT_DATABASE_URL must be set; there is no default DSN.
-Imports only from agent.tools — no postgresql:// literal; no literal JSON results.
+Imports only from agent.tools — no hardcoded DSN; no literal JSON results.
 """
 
 from __future__ import annotations
