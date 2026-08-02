@@ -67,7 +67,7 @@ $ ./scripts/prove_readme_structure.sh
 == 3. badge ordering — shields.io after slot-2 image, no <img before H1 ==
   ok   — no shields.io before slot-2 image, no <img before H1
 == 4. every local link and image target resolves on disk ==
-  ok   — all 47 local targets resolve
+  ok   — all 48 local targets resolve
 == 5. section-3 failure-mode table matches ARCHITECTURE.md §2 sources ==
   ok   — section-3 (source, failure) pairs match ARCHITECTURE.md §2 (5 rows)
 == 6. quickstart block — git clone, script line, exists and executable ==
