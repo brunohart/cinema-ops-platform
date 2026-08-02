@@ -96,9 +96,10 @@ Stated plainly, because a gap I have named is worth more than a gap a reviewer f
 The claim here is not *I used AI* — it is *there is a practice*, and a practice is something a
 script can check rather than something you have to take my word for.
 
-- **Spec before prompting.** Commit one (`4f05bb5`, 2026-07-30) is `ARCHITECTURE.md` and
-  `DECISIONS.md` — nothing under `src/`, `dbt/`, `sql/`, `tests/` or `scripts/`. The first pipeline
-  code landed a day later. Prompting ran against that spec, not a blank page.
+- **Spec before prompting.** Commit one (`4f05bb5`, 2026-07-30) is `ARCHITECTURE.md`,
+  `DECISIONS.md` and toolchain config — no code, nothing under `src/`, `dbt/`, `sql/`, `tests/` or
+  `scripts/`. The first pipeline code landed a day later. Prompting ran against that spec, not a
+  blank page.
 - **Tests read the implementation before they were written.** Paired by basename against the code
   they test, no test's own first commit precedes the implementation's.
 - **Plan, implement, verify — every issue.** Opus plans (read-only), Sonnet implements, Opus
