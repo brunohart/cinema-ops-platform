@@ -190,7 +190,32 @@ the Citation index below pins each claim to a literal string in a real file.
 ./scripts/prove_rejection_notes.sh
 ```
 
-<!-- verbatim captured output pasted here in Step 4, then: -->
+```
+== 1. artefact shape — header, Model 02 line, five headings in order ==
+  ok   — header fields present, Model 02 line present, five headings present once each in order
+== 2. exactly three notes between '## The three rejections' and '## What the three have in common' ==
+  ok   — exactly 3 notes: ['### 1. The watermark was written before the bronze write', '### 2. The consumer committed the offset before the write — then offered a lock table to fix it', '### 3. It called a strict `>` cut "correct incremental extraction"']
+== 3. five labelled parts appear exactly once in each note ==
+  ok   — all 5 labelled parts appear exactly once in each of 3 notes
+== 4. each note has a 'rejected: ... <-- window:' block and a 'shipped:' block ==
+  ok   — all 3 notes have a rejected+window block and a shipped block
+== 5. every cited repo path resolves on disk ==
+  ok   — 32 cited repo path(s) resolve on disk
+== 6. every cited test node id exists; each note cites >= 2 ==
+  ok   — 10 cited test node id(s) across 3 notes all resolve to a real 'def'
+== 7. every cited ADR exists in DECISIONS.md; each note cites >= 1 ADR and >= 1 docs/*.md artefact ==
+  ok   — 2 distinct ADR(s) cited, all exist in DECISIONS.md; every note cites >= 1 ADR and >= 1 docs artefact
+== 8. Citation index table has >= 12 rows and every literal is verbatim in its file ==
+  ok   — Citation index has 13 rows, every literal found verbatim in its file
+== 9. no denylisted phrases; each note <= 350 prose words ==
+  ok   — no denylisted phrases; note word counts (code fences excluded): [236, 283, 330]
+
+PASS=9
+
+== trailing: run cited test node ids under pytest, if importable ==
+  skip — pytest not importable in this environment; PASS=9 above already checked file/def existence
+```
+
 Exit code: 0.
 
 ## Citation index
