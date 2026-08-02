@@ -55,9 +55,10 @@ words, mentions `ARCHITECTURE.md`, `DECISIONS.md`, `docs/agent-ledger/`, `ruff`,
   them). VDE-58 exhibits and proves that decision; it does not take a new one-way door. This also
   avoids the ADR-number race the ledger has already recorded twice this week (main is at ADR-016).
 - **Above the fold, not a `<details>` block.** A reviewer who never opens a collapsed section has
-  not been shown the four claims. The four-minute budget survives: the new section adds 166 words to
-  a 1014-word above-fold total, landing at 1187 — under the 1300-word check-8 ceiling and under the
-  1250 target the plan set aside for later issues.
+  not been shown the four claims. The four-minute budget survives: the section is 170 words after
+  two review-loop wording fixes (the word count moved 166 → 170; see "Trail" below for the fix
+  commits), landing the above-fold total at 1191 — under the 1300-word check-8 ceiling and under
+  the 1250 target the plan set aside for later issues.
 - **`prove_readme_structure.sh` check 1 and check 8 updated, minimally.** Placing the new section
   above the fold changes the anchor set from seven to eight; check 1's anchor list and check 8's
   wording ("sections 1–6" → "above-fold") were updated to match. No other check's semantics changed,
@@ -81,16 +82,16 @@ count, that session must be named here rather than silently absorbed into "7 ses
 
 ## Proof — verbatim captured output
 
-Re-captured after the verifier's first-pass fixes (the Prove-it row wording, and this note). The
-ledger's two counts below — `76 entries` and `8 session(s) checked` — are as of this capture only:
-every subsequent `agent_ledger.py append` (this issue's own `verify` entry included) advances both,
-so a later re-run of `./scripts/prove_ai_practice.sh` will not reproduce these exact two numbers,
-and that is expected — the check re-derives them from the ledger as it stands at run time rather
-than asserting a fixed count.
+Re-captured after the third fix loop (the check-1 banner wording, and the two prose corrections
+below). The ledger's two counts inside the output — `entries` and `session(s) checked` — are as of
+this capture only: every subsequent `agent_ledger.py append` (including this issue's own `note`
+entries recording each fix loop) advances both, so a later re-run of `./scripts/prove_ai_practice.sh`
+will not reproduce these exact two numbers, and that is expected — the check re-derives them from
+the ledger as it stands at run time rather than asserting a fixed count.
 
 ```
 $ ./scripts/prove_ai_practice.sh && ./scripts/prove_readme_structure.sh
-== 1. commit one is spec-only (ARCHITECTURE.md + DECISIONS.md, nothing else) ==
+== 1. commit one carries no code (spec + toolchain config) ==
   ok   — commit one (4f05bb5, 2026-07-30) is exactly ['.gitignore', '.mcp.json', 'ARCHITECTURE.md', 'DECISIONS.md']
 == 2. the spec precedes the pipeline (commit one predates the first src/dbt/sql commit) ==
   ok   — commit one (4f05bb5, 2026-07-30 20:56:06 +1200) precedes first pipeline commit (8f2aa34, 2026-07-31 00:08:20 +0000) — 'VDE-9: add BaseExtractor with retry, quarantine, watermark-last'
@@ -105,12 +106,12 @@ $ ./scripts/prove_ai_practice.sh && ./scripts/prove_readme_structure.sh
   ok   — pairs=7 gated=7; 2 landed in a strictly later commit than the implementation they test
 == 4. the ledger shows plan before implement, in every recorded session ==
   ok   — 8 session(s) checked; plan precedes implement in every one
-ledger ok: 76 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
+ledger ok: 81 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
   ok   — ledger chain validates (python3 scripts/agent_ledger.py validate)
 == 5. CI workflow and pipeline hook contain the gates the model could not talk past ==
   ok   — ci.yml contains ['ruff check', 'mypy src', 'pytest', 'dbt build', 'scripts/check_dbt_results.py']; hooks.json registers a stop hook running pipeline_hook.py
 == 6. README section '## How this was built with AI' exists and says the four things ==
-  ok   — section present once, in order, 166 words (≤ 220), mentions all required names, links docs/2026-08-02-vde-58-ai-first-practice.md which exists on disk
+  ok   — section present once, in order, 170 words (≤ 220), mentions all required names, links docs/2026-08-02-vde-58-ai-first-practice.md which exists on disk
 
 == evidence: git log --oneline --reverse | head -20 ==
 4f05bb5 Commit one: architecture, decisions, and MCP toolchain config
@@ -150,7 +151,7 @@ PASS=6
 == 7. section 5 — agent_access_log, absent, no PII column names ==
   ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names
 == 8. section 6 ≥ 4 bullets; above-fold ≤ 1300 words ==
-  ok   — section 6 has 7 bullets; above-fold is 1187 words (≤ 1300)
+  ok   — section 6 has 7 bullets; above-fold is 1191 words (≤ 1300)
 
 == bash -n scripts/quickstart.sh ==
   ok   — bash -n scripts/quickstart.sh
@@ -172,4 +173,7 @@ issue **VDE-58** → branch `cursor/vde-58-ai-first-section-fa90` → this artef
 Commits: `VDE-58: add scripts/prove_ai_practice.sh — six checks against git history, ledger and CI` ·
 `VDE-58: README above-fold AI-practice section + artefact link + prove_readme_structure.sh anchor
 update` · `VDE-58: ARCHITECTURE.md §10 — decision-log row for the AI-first practice section` ·
-`VDE-58: capture proof output in the artefact`
+`VDE-58: capture proof output in the artefact` · `VDE-58: verifier fixes — Prove-it row wording
+matches check 1's actual allowlist; artefact notes ledger counts advance on re-run` ·
+`VDE-58: README section body — fix remaining overclaim about commit one's contents` ·
+`VDE-58: prove_ai_practice.sh check 1 banner wording + re-captured proof`
