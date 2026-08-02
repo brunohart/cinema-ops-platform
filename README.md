@@ -77,7 +77,7 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 ---
 
-## What I would do differently at circuit scale — and what I deliberately did not build
+## What breaks at circuit scale
 
 ### At circuit scale, these break first
 
@@ -88,17 +88,8 @@ A national circuit runs hundreds of sites and years of transactions; this build 
 - **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, written at the end of every run. At 400 sites it has to become `(site_id, source)`, partitioned by site, or the fleet serialises behind one lock.
 - **One Slack webhook becomes routing.** Every failure posts to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for warnings.
 
-### Deliberately not built
-
-Each names the first move if I had a week; an item I could not answer that for was cut.
-
-- **Real CDC** — rejected on operational, not technical grounds ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
-- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
-- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
-- **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
-- **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
-- **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
-- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
+*Seven things I deliberately did not build, each with the first move if I had a week:*
+[**Deliberately not built**](#deliberately-not-built) — below the fold.
 
 ---
 
@@ -200,6 +191,23 @@ pytest -q                       # the whole suite
 > the three-day gap between knowing and acting cost everything the rule was meant to prevent. Both
 > are in [§7, field corrections](ARCHITECTURE.md#7-field-corrections). The incident stays; only the
 > defect is gone.
+
+</details>
+
+<details>
+<summary>Deliberately not built</summary>
+
+Each names the first move if I had a week; an item I could not answer that for was cut.
+A gap I have named is worth more than a gap a reviewer finds — it is below the fold for
+length, not for cover.
+
+- **Real CDC** — rejected on operational, not technical grounds ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
+- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
+- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
+- **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
+- **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
+- **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
+- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
 
 </details>
 

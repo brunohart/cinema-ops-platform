@@ -38,7 +38,7 @@ anchors = [
     "## What happens when a source breaks",
     "## 60-second quickstart",
     "## The agent interface, and why it is safe",
-    "## What I would do differently at circuit scale — and what I deliberately did not build",
+    "## What breaks at circuit scale",
     "## How this was built with AI",
     "## Below the fold — the long form",
 ]
@@ -396,7 +396,7 @@ def find_section(heading, lines):
     return next((i for i, ln in enumerate(lines) if ln.rstrip() == heading), None)
 
 sec1 = find_section("# cinema-ops-platform", lines)
-sec6 = find_section("## What I would do differently at circuit scale — and what I deliberately did not build", lines)
+sec6 = find_section("## What breaks at circuit scale", lines)
 fold = find_section("## Below the fold — the long form", lines)
 
 if sec1 is None or sec6 is None or fold is None:
@@ -414,7 +414,13 @@ if bullet_count < 4:
 # Staleness guard — same VDE-53/VDE-55 lesson made mechanical for README's own
 # "deliberately did not build" section: a path that has shipped on disk paired
 # with the stale phrase that would be a lie if it still appeared here.
-sec6_joined = "\n".join(sec6_text)
+# Scanned across the WHOLE README, not just section 6. The list this guard was
+# written against ("Deliberately not built") moved below the fold on 2026-08-03 to
+# meet the word budget; scoping the guard to one section would have silently
+# disabled it at exactly the moment the content it checks changed address. A check
+# that stops checking when its subject moves is worse than no check, because the
+# green stays.
+sec6_joined = open("README.md").read()
 shipped = [
     ("mcp/src/mcp.ts", r'MCP server\b.*not\b|MCP.*not (yet )?built'),
     ("dbt/models/gold/fct_booking.sql", r'gold dbt transforms.*not yet written|dbt transforms.*not yet'),
@@ -524,9 +530,11 @@ echo "== 10. section 6 — scale bullets carry numbers; every omission has a one
 python3 - <<'PY' || exit 1
 import os, re, sys
 
-SEC6 = "## What I would do differently at circuit scale — and what I deliberately did not build"
+SEC6 = "## What breaks at circuit scale"
 SUB_SCALE = "### At circuit scale, these break first"
-SUB_CUT = "### Deliberately not built"
+# The omissions list moved below the fold on 2026-08-03 (word budget). It is a
+# <details> summary now, not an H3 — still one occurrence, still checked.
+SUB_CUT = "<summary>Deliberately not built</summary>"
 FOLD = "## Below the fold — the long form"
 
 lines = open("README.md").read().splitlines()
@@ -539,15 +547,20 @@ def find(heading):
     return hits[0]
 
 sec6, scale, cut, fold = find(SEC6), find(SUB_SCALE), find(SUB_CUT), find(FOLD)
-if not sec6 < scale < cut < fold:
-    print("  FAIL — section 6 sub-headings are out of order", file=sys.stderr)
+if not sec6 < scale < fold < cut:
+    print("  FAIL — section 6 / omissions headings are out of order", file=sys.stderr)
     sys.exit(1)
 
 def bullets(start, end):
     return [ln for ln in lines[start:end] if ln.startswith("- ")]
 
-scale_bullets = bullets(scale, cut)
-cut_bullets = bullets(cut, fold)
+cut_end = next((i for i in range(cut, len(lines)) if lines[i].rstrip() == "</details>"), len(lines))
+# Bound the scale bullets by their own section, not by the fold — "## How this was
+# built with AI" sits between them and would otherwise be counted as scale bullets.
+scale_end = next((i for i in range(scale + 1, len(lines))
+                  if re.match(r"^## ", lines[i])), fold)
+scale_bullets = bullets(scale, scale_end)
+cut_bullets = bullets(cut, cut_end)
 
 if len(scale_bullets) < 4:
     print(f"  FAIL — scale sub-section has {len(scale_bullets)} bullet(s), need >= 4", file=sys.stderr)
@@ -577,7 +590,10 @@ for b in cut_bullets:
         sys.exit(1)
 
 # Freshness tripwires — a claim that something is unbuilt must die when it is built.
-sec6_text = "\n".join(lines[sec6:fold])
+# Whole file, for the same reason the check-8 guard scans it: the claims this
+# tripwire hunts moved below the fold, and a tripwire scoped to where they used
+# to live is a tripwire that has been stepped over.
+sec6_text = "\n".join(lines)
 wf_dir = ".github/workflows"
 workflows = ""
 if os.path.isdir(wf_dir):
