@@ -77,15 +77,54 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 ---
 
-## What I deliberately did not build
+## What I would do differently at circuit scale — and what I deliberately did not build
 
-Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
+### At circuit scale, these break first
 
 - **A continuous, model-graded adversarial evaluation suite standing on every PR** — the VDE-48 synopsis-injection red-team fixture and the MCP boundary eval (`evals/mcp.yaml`, `evals/redteam.yaml`, proved by `scripts/prove_mcp_eval.sh`) are deterministic and built; a broader suite that grades novel adversarial prompts on every change, rather than a fixed fixture, is not.
 - **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
 - **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
 - **No real operator data** — this holds synthetic data and is not trying to become a product.
 - **The bronze-immutability guard is currently red on `main`, and it is right to be** — a test-only `reset_tables()` helper containing `TRUNCATE` landed inside `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. The fix is to move the helper out of `src/`; the incident stays visible rather than being tidied away.
+Vista's customers run hundreds of sites and years of transactions. The numbers below are mine, and specific enough to be wrong.
+
+- **`fct_booking` past ~50M rows.** Postgres is a row store ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)); somewhere in the tens of millions the gold aggregates behind a tool call stop being index scans. The move is a columnar engine behind the same dbt models, not a bigger instance.
+- **Four sources become hundreds of sites.** One extractor per shape stops being the unit of work: Dagster partitions keyed on `site_id`, a per-site run log, and a budget where 3 sites of 400 failing is a ticket rather than a page.
+- **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, updated at the end of every run. At 400 sites the key has to become `(site_id, source)` and the table partitioned by site, or the whole fleet serialises behind one lock.
+- **One Slack webhook becomes routing.** `slack_asset_check_alert_sensor` posts every failure to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for the warnings.
+
+### Deliberately not built
+
+Each names the first move if I had a week; an item I could not answer that for was cut.
+
+- **Real CDC** — rejected on operational grounds, not technical ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
+- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on top of it. *First week:* a `--from/--to` backfill CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
+- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
+- **A red team that runs on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 synopsis-injection proof runs in no workflow at all. *First week:* drop the path filter and run it against the CI Postgres service.
+- **No real operator data** — synthetic rows throughout, and none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
+- **The bronze-immutability guard is red on `main`, and it is right to be** — a test-only `reset_tables()` containing `TRUNCATE` landed in `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught what it was written to catch. *First week:* move the helper into `tests/`.
+
+---
+
+## How this was built with AI
+
+The claim here is not *I used AI* — it is *there is a practice*, and a practice is something a
+script can check rather than something you have to take my word for.
+
+- **Spec before prompting.** Commit one (`4f05bb5`, 2026-07-30) is `ARCHITECTURE.md`,
+  `DECISIONS.md` and toolchain config — no code, nothing under `src/`, `dbt/`, `sql/`, `tests/` or
+  `scripts/`. The first pipeline code landed a day later. Prompting ran against that spec, not a
+  blank page.
+- **Tests read the implementation before they were written.** Paired by basename against the code
+  they test, no test's own first commit precedes the implementation's.
+- **Plan, implement, verify — every issue.** Opus plans (read-only), Sonnet implements, Opus
+  verifies (read-only); each phase appends its lesson to
+  [`docs/agent-ledger/`](docs/agent-ledger/) before handing over, so the next run starts past traps
+  the last one already hit.
+- **Gates the model could not talk past.** `ruff`, `mypy`, `pytest` and `dbt` test failures fail CI,
+  and a hook refuses to let a repo-changing run finish unrecorded.
+
+`./scripts/prove_ai_practice.sh` — [recorded](docs/2026-08-02-vde-58-ai-first-practice.md).
 
 *The problem this repository exists to answer, the four failure modes and how each is handled, and the governance model behind it, argued end to end: [`docs/2026-08-02-vde-55-case-study.md`](docs/2026-08-02-vde-55-case-study.md).*
 
@@ -151,6 +190,9 @@ pytest -q                       # the whole suite
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
 | public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
 | case study — six section anchors, word band, operator-language test, staleness guard against what has actually shipped | `./scripts/prove_case_study.sh` | [recorded](docs/2026-08-02-vde-55-case-study.md) — `PASS=10` |
+| section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
+| spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
+| 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
 
 > [!WARNING]
 > **The bronze-immutability guard is red on `main`, and it is right to be.** A test-only
@@ -345,6 +387,10 @@ input rather than the agent's word, and a run that changed the repository cannot
 the three entries is missing. `./scripts/prove_agent_pipeline.sh` proves all of it on a clean clone
 with nothing installed but Python and git.
 
+That the spec preceded the code, and not only that the pipeline exists, is what
+[`./scripts/prove_ai_practice.sh`](docs/2026-08-02-vde-58-ai-first-practice.md) checks against git
+history directly, above the fold.
+
 </details>
 
 <details>
@@ -429,6 +475,7 @@ VDE-11  ──▶  cursor/vde-11-bronze-immutable-a4e2  ──▶  sql/init/002_
 | [#45](https://github.com/brunohart/cinema-ops-platform/pull/45) | VDE-52 | three least-privilege roles: extractor writes bronze, transformer reads bronze and owns silver+gold, api reads gold | in flight |
 | [#46](https://github.com/brunohart/cinema-ops-platform/pull/46) | VDE-51 | secrets out of the repo — full-history credential scan, blank `.env.example`, `secret-scan` workflow | in flight |
 | [#47](https://github.com/brunohart/cinema-ops-platform/pull/47) | VDE-54 | public Fly demo of the bearer-scoped tool surface — stdlib-only image, demo token scoped to two sites / three tools / 30 days | in flight |
+| — | VDE-57 | 3-minute Loom: rehearsable shot list (7 beats), two demo entry points, SLACK_WEBHOOK_URL in compose, PASS=10 proof | [#54](https://github.com/brunohart/cinema-ops-platform/pull/54) |
 
 
 The row with `#42` has no issue id, and that gap stays visibly empty rather than being filled in
@@ -498,7 +545,13 @@ scripts/
                            docker compose up → fct_booking_rows > 0 (grain-checked) →
                            PROOF OK; also asserts seed log shows dagster path
   prove_public_demo.sh     public demo surface proof (stdlib-only, no Postgres)
+  demo_prepare.sh          create cinema_redteam, apply redteam SQL set, poison synopsis (VDE-57)
+  prove_loom_demo.sh       shot list + entry point proof — bash+python3 only, PASS=10 (VDE-57)
   (other scripts)          one proof command per claim
+
+demo/
+  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57)
+  inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
 tests/                     30 tests; all HTTP mocked, no live API calls
