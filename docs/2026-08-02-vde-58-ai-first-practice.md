@@ -81,6 +81,13 @@ count, that session must be named here rather than silently absorbed into "7 ses
 
 ## Proof — verbatim captured output
 
+Re-captured after the verifier's first-pass fixes (the Prove-it row wording, and this note). The
+ledger's two counts below — `76 entries` and `8 session(s) checked` — are as of this capture only:
+every subsequent `agent_ledger.py append` (this issue's own `verify` entry included) advances both,
+so a later re-run of `./scripts/prove_ai_practice.sh` will not reproduce these exact two numbers,
+and that is expected — the check re-derives them from the ledger as it stands at run time rather
+than asserting a fixed count.
+
 ```
 $ ./scripts/prove_ai_practice.sh && ./scripts/prove_readme_structure.sh
 == 1. commit one is spec-only (ARCHITECTURE.md + DECISIONS.md, nothing else) ==
@@ -97,8 +104,8 @@ $ ./scripts/prove_ai_practice.sh && ./scripts/prove_readme_structure.sh
   note — unpaired, not gated: tests/test_idempotency.py
   ok   — pairs=7 gated=7; 2 landed in a strictly later commit than the implementation they test
 == 4. the ledger shows plan before implement, in every recorded session ==
-  ok   — 7 session(s) checked; plan precedes implement in every one
-ledger ok: 73 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
+  ok   — 8 session(s) checked; plan precedes implement in every one
+ledger ok: 76 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
   ok   — ledger chain validates (python3 scripts/agent_ledger.py validate)
 == 5. CI workflow and pipeline hook contain the gates the model could not talk past ==
   ok   — ci.yml contains ['ruff check', 'mypy src', 'pytest', 'dbt build', 'scripts/check_dbt_results.py']; hooks.json registers a stop hook running pipeline_hook.py
