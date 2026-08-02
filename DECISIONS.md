@@ -595,3 +595,54 @@ Postgres version that makes enumerated column grants as expressive as table-leve
 so the column-scope on `dim_customer` is not the only way to express PII absence.
 
 ---
+
+## ADR-017 — MCP access log written in TypeScript via the same Queryable; token resolved from DB when DSN present
+
+**Status** Accepted · 2026-08-02
+
+**Context** VDE-46's load-bearing gap: the TypeScript MCP path wrote nothing to
+`meta.agent_access_log`. The Python tools path (VDE-43) had already established the
+pattern — every call, including refusals, writes one row. The TypeScript server needs
+the same guarantee before it is usable for audit.
+
+Three sub-questions came up during planning:
+
+1. **Where does the log write live?** Option A: inside `runTool` via the passed-in `Queryable`.
+   Option B: a separate middleware or log-specific DB handle.
+2. **How is the token resolved in production?** Option A: `AGENT_TOKEN` env var → sha256 lookup
+   in `meta.agent_tokens`. Option B: keep AGENT_SITE_IDS/AGENT_SUB/AGENT_ALLOWED_TOOLS forever.
+3. **What happens when the log write fails?** Option A: fail-closed — throw and do not return
+   results. Option B: log the error and proceed (log-and-continue).
+
+**Decision**
+
+1. `logAccess` called inside `runTool` via the same `Queryable` that executes the tool query.
+   No separate handle, no extra interface. The fixture `DbHandle` handles the insert branch
+   (file-backed JSONL for proof runs; no-op for inspector baseline). The DB handle sends it
+   to `meta.agent_access_log` in Postgres.
+
+2. `resolveServerToken` in `mcp.ts` selects the resolution path at startup:
+   - `AGENT_TOKEN` set + DSN present + not in fixture mode → `resolveAgentToken(db, bearer)`
+     via `token_db.ts` (sha256 hash, expiry and revocation checked in TypeScript after fetch).
+   - Otherwise → `tokenFromEnv()` (fixture / inspector path; AGENT_SITE_IDS / AGENT_ALLOWED_TOOLS).
+   The paths never mix at runtime; the fixture path is not a degraded production path.
+
+3. Fail-closed. `logAccess` throws `AccessLogUnavailableError` on any DB failure; `runTool`
+   does not suppress it. A tool call that cannot be logged does not return results.
+
+**Consequences** Params logged are restricted to `from`, `to`, `limit`, `site_ids` (no PII —
+CLAUDE.md §6). `allowedTools` on `AgentToken` is an optional key, omitted when not set
+(not assigned `undefined`), satisfying `exactOptionalPropertyTypes: true`. The fixture DB
+supports `AGENT_ACCESS_LOG_FILE` for proof-run inspection and `AGENT_ACCESS_LOG_FAIL=1`
+as a kill switch for the fail-closed test.
+
+ADR-009 is unchanged — no new tool, no new query, no new grant file (VDE-52 `agent_reader`
+already holds INSERT + SELECT on `meta.agent_access_log`).
+
+**What would change my mind** A clock-speed argument: if logging on the critical path of
+every tool call adds measurable latency at volume, a background async queue with at-least-once
+delivery is better than fail-closed. At the current scale (a single operator MCP session),
+the synchronous path is correct — it makes the audit guarantee structural rather than
+probabilistic.
+
+---
