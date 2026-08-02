@@ -146,6 +146,7 @@ services:
       DAGSTER_HOME: /dagster_home
       KAFKA_BOOTSTRAP: "redpanda:9092"
       TMDB_API_KEY: "${TMDB_API_KEY:-}"
+      SLACK_WEBHOOK_URL: "${SLACK_WEBHOOK_URL:-}"
     volumes:
       - dagster_home:/dagster_home
     ports:
