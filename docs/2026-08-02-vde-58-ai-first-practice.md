@@ -82,5 +82,87 @@ count, that session must be named here rather than silently absorbed into "7 ses
 ## Proof — verbatim captured output
 
 ```
-(pending — captured in the final commit of this issue)
+$ ./scripts/prove_ai_practice.sh && ./scripts/prove_readme_structure.sh
+== 1. commit one is spec-only (ARCHITECTURE.md + DECISIONS.md, nothing else) ==
+  ok   — commit one (4f05bb5, 2026-07-30) is exactly ['.gitignore', '.mcp.json', 'ARCHITECTURE.md', 'DECISIONS.md']
+== 2. the spec precedes the pipeline (commit one predates the first src/dbt/sql commit) ==
+  ok   — commit one (4f05bb5, 2026-07-30 20:56:06 +1200) precedes first pipeline commit (8f2aa34, 2026-07-31 00:08:20 +0000) — 'VDE-9: add BaseExtractor with retry, quarantine, watermark-last'
+== 3. no test predates the implementation it tests (unique basename pairing) ==
+  note — unpaired, not gated: tests/agents/test_agent_ledger.py
+  note — unpaired, not gated: tests/bronze/test_immutability.py
+  note — unpaired, not gated: tests/extractors/test_cinema_ops_lag.py
+  note — unpaired, not gated: tests/extractors/test_stamp.py
+  note — unpaired, not gated: tests/integration/test_medallion_dag.py
+  note — unpaired, not gated: tests/orchestration/test_slack_alerts.py
+  note — unpaired, not gated: tests/test_idempotency.py
+  ok   — pairs=7 gated=7; 2 landed in a strictly later commit than the implementation they test
+== 4. the ledger shows plan before implement, in every recorded session ==
+  ok   — 7 session(s) checked; plan precedes implement in every one
+ledger ok: 73 entries, hash chains intact — /workspace/docs/agent-ledger/ledger.jsonl
+  ok   — ledger chain validates (python3 scripts/agent_ledger.py validate)
+== 5. CI workflow and pipeline hook contain the gates the model could not talk past ==
+  ok   — ci.yml contains ['ruff check', 'mypy src', 'pytest', 'dbt build', 'scripts/check_dbt_results.py']; hooks.json registers a stop hook running pipeline_hook.py
+== 6. README section '## How this was built with AI' exists and says the four things ==
+  ok   — section present once, in order, 166 words (≤ 220), mentions all required names, links docs/2026-08-02-vde-58-ai-first-practice.md which exists on disk
+
+== evidence: git log --oneline --reverse | head -20 ==
+4f05bb5 Commit one: architecture, decisions, and MCP toolchain config
+bb4aca1 Add CLAUDE.md — the rules every agent session inherits
+1972b30 Add scripts/seed-linear.mjs — generate the Linear backlog from the spec
+8f2aa34 VDE-9: add BaseExtractor with retry, quarantine, watermark-last
+9f1e096 Ignore Python bytecode and remove accidentally committed caches
+13bcfeb VDE-11: enforce bronze immutability via grants and grep
+b4619e4 VDE-12: add TMDBExtractor.fetch with pagination and Retry-After
+43abfd6 VDE-12: mock HTTP tests for pagination and 429 Retry-After
+d54ca9a VDE-15: prove re-run idempotency against throwaway Postgres
+6cc20f3 VDE-14: quarantine bad rows into bronze.quarantine
+ef54b70 VDE-13: file extractor with Pydantic schema-drift quarantine
+7157051 VDE-13: drop unused dumps_payload helper
+a0b19a6 VDE-9: BaseExtractor with retry, quarantine, and watermark-last (#1)
+bca1061 VDE-9: add BaseExtractor with retry, quarantine, watermark-last
+7d58ff2 Ignore Python bytecode and remove accidentally committed caches
+4a177f0 VDE-10: expose BaseExtractor.stamp() for bronze audit columns
+28205fe VDE-10: add stamp proof tests (unstamped=0, hash stability)
+540cedc Merge pull request #3 from brunohart/cursor/vde-11-bronze-immutable-a4e2
+8a011eb Merge origin/main into VDE-12 TMDB extractor branch
+f776c71 VDE-12: finish merge resolution for extractors __init__
+
+PASS=6
+== 1. eight section anchors exist once each, in order ==
+  ok   — all eight anchors present once each, in order
+== 2. opening paragraph: one sentence-ending period, ≤ 45 words ==
+  ok   — one paragraph, one period, 45 words (≤ 45)
+== 3. badge ordering — shields.io after slot-2 image, no <img before H1 ==
+  ok   — no shields.io before slot-2 image, no <img before H1
+== 4. every local link and image target resolves on disk ==
+  ok   — all 51 local targets resolve
+== 5. section-3 failure-mode table matches ARCHITECTURE.md §2 sources ==
+  ok   — section-3 (source, failure) pairs match ARCHITECTURE.md §2 (5 rows)
+== 6. quickstart block — git clone, script line, exists and executable ==
+  ok   — git clone + script line; scripts/quickstart.sh exists, is executable, URL matches PRINTED_URL
+== 7. section 5 — agent_access_log, absent, no PII column names ==
+  ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names
+== 8. section 6 ≥ 4 bullets; above-fold ≤ 1300 words ==
+  ok   — section 6 has 7 bullets; above-fold is 1187 words (≤ 1300)
+
+== bash -n scripts/quickstart.sh ==
+  ok   — bash -n scripts/quickstart.sh
+
+== ./scripts/quickstart.sh --check ==
+quickstart: check ok — http://127.0.0.1:3000
+
+== 9. below-fold sentinel phrases still appear ==
+  ok   — all 4 sentinel phrases present below the fold
+
+PASS=9
 ```
+
+Exit code: 0.
+
+## Trail
+
+issue **VDE-58** → branch `cursor/vde-58-ai-first-section-fa90` → this artefact  
+Commits: `VDE-58: add scripts/prove_ai_practice.sh — six checks against git history, ledger and CI` ·
+`VDE-58: README above-fold AI-practice section + artefact link + prove_readme_structure.sh anchor
+update` · `VDE-58: ARCHITECTURE.md §10 — decision-log row for the AI-first practice section` ·
+`VDE-58: capture proof output in the artefact`
