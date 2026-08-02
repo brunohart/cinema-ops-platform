@@ -77,17 +77,27 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 ---
 
-## What I deliberately did not build
+## What I would do differently at circuit scale — and what I deliberately did not build
 
-Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
+### At circuit scale, these break first
 
-- **`silver` and `gold` dbt transforms** (grain scaffold declared; models not yet written — see VDE-26) and **Dagster asset checks / SLAs** ([ARCHITECTURE §5](ARCHITECTURE.md#5-slas--freshness-completeness-correctness)) — the next build increment.
-- **The MCP server itself** — the `meta.agent_access_log` store and the allowlisted query layer exist; the server that exposes them to a client does not. The interface is specified and the safety properties are structural; the wire protocol is the last mile.
-- **The evaluation layer beyond the VDE-48 synopsis-injection red-team fixture** — an injection-resistance claim with no test behind it is a hope with good posture. Adversarial prompt-injection testing is built alongside the pipeline rather than added later.
-- **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
-- **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
-- **No real operator data** — this holds synthetic data and is not trying to become a product.
-- **The bronze-immutability guard is currently red on `main`, and it is right to be** — a test-only `reset_tables()` helper containing `TRUNCATE` landed inside `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught exactly the thing it was written to catch. The fix is to move the helper out of `src/`; the incident stays visible rather than being tidied away.
+Vista's customers run hundreds of sites and years of transactions. The numbers below are mine, and specific enough to be wrong.
+
+- **`fct_booking` past ~50M rows.** Postgres is a row store ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)); somewhere in the tens of millions the gold aggregates behind a tool call stop being index scans. The move is a columnar engine behind the same dbt models, not a bigger instance.
+- **Four sources become hundreds of sites.** One extractor per shape stops being the unit of work: Dagster partitions keyed on `site_id`, a per-site run log, and a budget where 3 sites of 400 failing is a ticket rather than a page.
+- **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, updated at the end of every run. At 400 sites the key has to become `(site_id, source)` and the table partitioned by site, or the whole fleet serialises behind one lock.
+- **One Slack webhook becomes routing.** `slack_asset_check_alert_sensor` posts every failure to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for the warnings.
+
+### Deliberately not built
+
+Each names the first move if I had a week; an item I could not answer that for was cut.
+
+- **Real CDC** — rejected on operational grounds, not technical ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
+- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on top of it. *First week:* a `--from/--to` backfill CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
+- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
+- **A red team that runs on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 synopsis-injection proof runs in no workflow at all. *First week:* drop the path filter and run it against the CI Postgres service.
+- **No real operator data** — synthetic rows throughout, and none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
+- **The bronze-immutability guard is red on `main`, and it is right to be** — a test-only `reset_tables()` containing `TRUNCATE` landed in `src/` when VDE-13 and VDE-15 merged, and the VDE-11 guard caught what it was written to catch. *First week:* move the helper into `tests/`.
 
 ---
 
