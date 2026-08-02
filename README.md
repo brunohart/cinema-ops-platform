@@ -81,7 +81,7 @@ Refusals are logged too, because a log of only successes cannot show someone pro
 
 Stated plainly, because a gap I have named is worth more than a gap a reviewer finds.
 
-- **The evaluation layer beyond the VDE-48 synopsis-injection red-team fixture** — an injection-resistance claim with no test behind it is a hope with good posture. Adversarial prompt-injection testing is built alongside the pipeline rather than added later.
+- **A continuous, model-graded adversarial evaluation suite standing on every PR** — the VDE-48 synopsis-injection red-team fixture and the MCP boundary eval (`evals/mcp.yaml`, `evals/redteam.yaml`, proved by `scripts/prove_mcp_eval.sh`) are deterministic and built; a broader suite that grades novel adversarial prompts on every change, rather than a fixed fixture, is not.
 - **Managed cloud, Spark, Kubernetes, Snowflake** ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)) — scoped to what can be operated and defended completely on a single machine. No surface area that a reviewer cannot inspect and run.
 - **Postgres over DuckDB** ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)) — the load-bearing requirement is access control and DuckDB has no role model. At genuine scale the honest answer is a columnar engine, which the medallion layering ports to largely intact.
 - **No real operator data** — this holds synthetic data and is not trying to become a product.
