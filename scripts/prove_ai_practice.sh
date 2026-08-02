@@ -309,9 +309,11 @@ print(f"  ok   — section present once, in order, {word_count} words (≤ 220),
 PY
 
 # ── evidence: the issue's own stated proof command, reproduced verbatim ──────
+# `|| true` absorbs the SIGPIPE (exit 141) that `head` closing the pipe early sends back to
+# `git log` under `set -o pipefail` — the command's own output is unaffected either way.
 echo ""
 echo "== evidence: git log --oneline --reverse | head -20 =="
-git log --oneline --reverse | head -20
+git log --oneline --reverse | head -20 || true
 
 echo ""
 echo "PASS=6"
