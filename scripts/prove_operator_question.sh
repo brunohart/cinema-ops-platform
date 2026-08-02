@@ -110,6 +110,9 @@ rows = [
 ]
 
 assert len(rows) == 3, "FAIL: expected exactly 3 log rows, got " + str(len(rows))
+assert all(isinstance(r.get("at"), str) and r["at"] for r in rows), (
+    "FAIL: every access-log row must carry a non-empty at timestamp"
+)
 
 ok_rows = [r for r in rows if r.get("outcome") == "ok"]
 refused_rows = [r for r in rows if r.get("outcome") == "refused"]
