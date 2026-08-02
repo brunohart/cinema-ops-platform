@@ -56,3 +56,59 @@ Unfixed rather than undecided: `FileExtractor` still rejects a file whole, behin
 ---
 
 ## Proof
+
+```bash
+./scripts/prove_case_study.sh && ./scripts/prove_readme_structure.sh
+```
+
+```
+== 1. case study file exists ==
+  ok   — docs/2026-08-02-vde-55-case-study.md exists and is non-empty
+== 2. six section headings exist once each, in order ==
+  ok   — all six section headings plus '## Proof' present once each, in order
+== 3. sections 1-6 word count is 1100-1350 ==
+  ok   — sections 1-6 are 1344 words (1100-1350)
+== 4. section 1 — operator language test ==
+  ok   — section 1 has 13 operator term(s), zero technical terms
+== 5. section 2 — four sources, their failures, 'shapes, not sources', 4b poison ==
+  ok   — section 2 names all four source shapes, their failure modes, the 'shapes, not sources' framing, and the poison-payload fifth shape
+== 6. section 3 — 4-5 paragraphs, >= 3 distinct ADRs ==
+  ok   — section 3 has 5 paragraphs and cites 5 distinct ADRs (['ADR-005', 'ADR-006', 'ADR-008', 'ADR-011', 'ADR-012'])
+== 7. section 4 — ADR-009, §6c, VDE-48 red-team, 'absent', no PII words ==
+  ok   — section 4 has ADR-009, §6c, VDE-48, the red-team script, 'absent', and no PII column names
+== 8. section 5 — fct_booking, 50M scale threshold, >= 4 stated numbers ==
+  ok   — section 5 names fct_booking, a ~50M-row scale threshold, and 14 stated numbers
+== 9. staleness guard — section 6 does not claim shipped paths as unbuilt ==
+  ok   — section 6 makes no stale unbuilt-claim about MCP, dbt, asset checks, the eval suite, or agent-api
+== 10. every local link target and cited ADR resolves ==
+  ok   — all 0 local link target(s) resolve; all 10 cited ADR(s) (ADR-002, ADR-005, ADR-006, ADR-008, ADR-009, ADR-010, ADR-011, ADR-012, ADR-015, ADR-016) exist in DECISIONS.md
+
+PASS=10
+== 1. seven section anchors exist once each, in order ==
+  ok   — all seven anchors present once each, in order
+== 2. opening paragraph: one sentence-ending period, ≤ 45 words ==
+  ok   — one paragraph, one period, 45 words (≤ 45)
+== 3. badge ordering — shields.io after slot-2 image, no <img before H1 ==
+  ok   — no shields.io before slot-2 image, no <img before H1
+== 4. every local link and image target resolves on disk ==
+  ok   — all 49 local targets resolve
+== 5. section-3 failure-mode table matches ARCHITECTURE.md §2 sources ==
+  ok   — section-3 (source, failure) pairs match ARCHITECTURE.md §2 (5 rows)
+== 6. quickstart block — git clone, script line, exists and executable ==
+  ok   — git clone + script line; scripts/quickstart.sh exists, is executable, URL matches PRINTED_URL
+== 7. section 5 — agent_access_log, absent, no PII column names ==
+  ok   — section 5 has agent_access_log, artefact link, 'absent', no PII column names
+== 8. section 6 ≥ 4 bullets; sections 1–6 ≤ 1300 words ==
+  ok   — section 6 has 5 bullets; sections 1–6 are 970 words (≤ 1300)
+
+== bash -n scripts/quickstart.sh ==
+  ok   — bash -n scripts/quickstart.sh
+
+== ./scripts/quickstart.sh --check ==
+quickstart: check ok — http://127.0.0.1:3000
+
+== 9. below-fold sentinel phrases still appear ==
+  ok   — all 4 sentinel phrases present below the fold
+
+PASS=9
+```
