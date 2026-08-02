@@ -239,4 +239,4 @@ Exit code: 0.
 ## Trail
 
 issue **VDE-59** → branch `cursor/day-7-rejection-notes-8acc` → this artefact  
-Commits: <!-- filled in Step 6 -->
+Commits: `VDE-59: artefact — three Model 02 rejections with drawable failure windows` · `VDE-59: add scripts/prove_rejection_notes.sh — nine structural checks on the rejection notes` · `VDE-59: record proof output in the VDE-59 artefact` · `VDE-59: README Prove-it row for prove_rejection_notes.sh` · `VDE-59: ledger — implement phase`
