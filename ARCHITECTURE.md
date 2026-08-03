@@ -3,7 +3,7 @@
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
 **Last revised:** 2026-08-03
-**Revision count:** 10
+**Revision count:** 11
 
 ---
 
@@ -128,7 +128,7 @@ secretly two tables, and every number derived from it will be wrong in a way tha
 | `fct_ticket_sale` | gold | one ticket sold — one seat, one showtime, one transaction line |
 | `fct_booking` | gold | one booking — one transaction, whatever number of tickets it contained |
 | `fct_showtime_performance` | gold | one showtime at one screen on one date, with its aggregate outcome |
-| `dim_film` | gold | one film, at one version of its attributes _(SCD2 — see below)_ |
+| `dim_film` | gold | one film, current attributes only — **Type-1 today**; the SCD2 grain below is the target, not the state _(section 7, 2026-08-03)_ |
 | `dim_cinema` | gold | one cinema site |
 | `dim_customer` | gold | one customer — the only table holding personal data, deliberately narrow |
 | `dim_date` | gold | one calendar date |
@@ -168,6 +168,12 @@ stored once can be corrected once, whereas the same name denormalised across a f
 never and drifts silently. And history: when an attribute changes, a dimension can record *when* it
 changed via SCD2, which is the only way `dim_film` can answer what a film's classification was on the
 night the ticket was sold rather than what it is today.
+
+That argument is why SCD2 is the target. It is not what is built: `dbt/models/gold/dim_film.sql` is a
+Type-1 dimension that emits `valid_from`, `valid_to` and `is_current` as constants — every row is
+current, `valid_to` is always null. The columns hold the shape and none of the history. A working
+SCD2 snapshot exists in `transform/`, a standalone project from VDE-27 that the live pipeline does
+not reference. Logged in section 7.
 
 The second rule, quieter but as sharp: nothing goes in a fact table that isn't true at the declared
 grain. `fct_ticket_sale` is one ticket, so a column holding total transaction revenue does not belong
@@ -395,7 +401,7 @@ meaningless integer.
 | `film_title` · `genre` · `certificate` · `runtime` · `release_date` · `tmdb_id` | public | content | anything |
 | `cinema_name` · `city` · `country` · `circuit` | public | exhibition | anything |
 | `screen_count` | internal | exhibition | capacity analysis |
-| `valid_from` · `valid_to` · `is_current` (SCD2) | internal | data platform | point-in-time joins |
+| `valid_from` · `valid_to` · `is_current` (SCD2 — **shape only, see section 7**) | internal | data platform | point-in-time joins *once the snapshot is live*; today they are constants and a point-in-time join silently returns current attributes for every date |
 | all `dim_date` columns | public | data platform | anything |
 
 **Bronze metadata**
@@ -484,7 +490,45 @@ Format:
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
 
-### 2026-08-03 · [CI] · the README badge said green while `main` was red
+### 2026-08-03 · [`dim_film`] · SCD2 claimed in five places, Type-1 in the one that runs
+
+**Predicted:**   Section 3a gave `dim_film` the grain "one film, at one version of its attributes
+(SCD2)". Section 3c argued it at length — SCD2 is "the only way `dim_film` can answer what a film's
+classification was on the night the ticket was sold". Section 6b classified `valid_from` · `valid_to`
+· `is_current` as the columns that make point-in-time joins possible. The README repeated the grain
+and put "SCD2" in the architecture diagram.
+
+**Observed:**    `dbt/models/gold/dim_film.sql` — the model the pipeline actually builds — is a
+Type-1 dimension, and says so in its own header comment. It emits the three SCD2 columns as
+constants: `valid_from` is `_ingested_at`, `valid_to` is `cast(null as timestamptz)`, `is_current` is
+the literal `true`. Every row is current. No row has ever been closed. There is no snapshot in
+`dbt/`, and `dbt_project.yml` has no snapshot path. The working SCD2 snapshot from VDE-27 lives in
+`transform/`, a separate dbt project that nothing in `src/`, `dbt/`, the compose stack or Dagster
+references — `DBT_PROJECT_DIR` points at `dbt/`.
+
+**Why the gap:**  VDE-27 built the snapshot as the first dbt project, in `transform/`. VDE-24 then
+built the silver and gold models in a second project at `dbt/`, and that one got wired into Dagster.
+The snapshot was never carried across, and nothing failed — because the *columns* were carried across
+as literals, so every downstream model, test and asset check kept passing. The documents were written
+against the intent and never re-read against the model.
+
+**The part that matters:** this is worse than an unimplemented feature, and it is the failure class
+section 3c warns about two paragraphs earlier. An absent column raises an error at the first join. A
+column that is present, correctly named, and constant answers the point-in-time question *confidently
+and wrongly* — `where is_current` returns every row, and a join on `valid_from`/`valid_to` returns
+today's attributes for every historical date. Nothing in the pipeline can detect it, because from the
+inside a constant is a valid value. Invariant C6 catches future-dated showtimes; nothing catches a
+dimension that has quietly stopped keeping history.
+
+**Changed:**      Sections 3a, 3c and 6b restated to say Type-1 with the SCD2 shape reserved, and the
+README's grain table and diagram with them. `transform/`'s status stated in the repository map rather
+than left for a reader to work out. Not silently fixed in SQL: implementing the snapshot properly is a
+build, and this section is for what is true today.
+
+**Cost:**         None realised — no consumer has run a point-in-time query, because the agent tools
+do not expose one. The cost was carried, not paid, and the correction is what stops it being paid
+later. Every claim in this file is now something I have read the code for rather than remembered
+writing.
 
 **Predicted:**   VDE-50 put `ruff`, `mypy`, unit, integration and `dbt build` behind CI, and the
 README carries the workflow's status badge. The implied claim is that `main` is green.

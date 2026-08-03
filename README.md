@@ -205,6 +205,7 @@ length, not for cover.
 - **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
 - **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
 - **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
+- **SCD2 on `dim_film`** — the live model is Type-1 and emits `valid_from`/`valid_to`/`is_current` as constants, so a point-in-time join returns today's attributes for every date; the working snapshot sits unwired in `transform/` ([ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections)). *First week:* move the snapshot into `dbt/`, build `dim_film` from it, and add an asset check that fails when every row is `is_current`.
 - **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
 - **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
 - **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
@@ -231,7 +232,7 @@ flowchart TB
     BR["bronze<br/>as landed, unparsed<br/>append-only"]
     QU["bronze.quarantine<br/>rejected rows<br/>+ raw_payload"]
     SI["silver<br/>validated, typed,<br/>conformed"]
-    GO["gold<br/>facts · dimensions<br/>SCD2"]
+    GO["gold<br/>facts · dimensions<br/>Type-1 dims"]
     MCP["MCP server<br/>fixed read-only tools<br/>no grant on PII"]
     AG["agent"]
 
@@ -312,7 +313,7 @@ months to find.
 | `fct_ticket_sale` | gold | one ticket sold — one seat, one showtime, one transaction line |
 | `fct_booking` | gold | one booking — one transaction, whatever number of tickets it contained |
 | `fct_showtime_performance` | gold | one showtime at one screen on one date, with its aggregate outcome |
-| `dim_film` | gold | one film, at one version of its attributes (SCD2) |
+| `dim_film` | gold | one film, current attributes only — Type-1 today; SCD2 is the target ([§7](ARCHITECTURE.md#7-field-corrections)) |
 | `dim_customer` | gold | one customer — the only table holding personal data, deliberately narrow |
 | `stg_*` | silver | one validated record from one source, one-to-one with bronze |
 | `raw_*` | bronze | one payload as received, plus ingestion metadata |
@@ -528,11 +529,17 @@ sql/
 
 agent-api/                 allowlisted queries + Hono read path (no SQL door)
 
-dbt/
+dbt/                       THE LIVE PROJECT — DBT_PROJECT_DIR points here
   models/bronze/           sources only — bronze stays DDL + extractors
   models/silver/           stg_* — typed, renamed, deduped on natural key
   models/gold/             dim_* / fct_* — surrogates on dims; keys + measures on facts
   macros/                  schema names land as silver / gold, not prefixed
+
+transform/                 NOT wired in. The VDE-27 SCD2 snapshot spike, kept as the
+                           audit trail for that issue and because it is the working
+                           implementation gold does not yet use. dim_film in dbt/ is
+                           Type-1 (ARCHITECTURE §7, 2026-08-03). Read this before
+                           assuming the repo has two live dbt projects — it has one.
 
 mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
 evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
