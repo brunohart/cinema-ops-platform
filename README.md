@@ -338,6 +338,7 @@ pytest -q                       # the whole suite
 | section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
 | spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
 | 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
+| three Model-02 rejections are specific, not general — each names a before/after ordering and a window, cites files/tests/ADRs that exist, and every citation literal still greps | `./scripts/prove_rejection_notes.sh` | [recorded](docs/2026-08-02-vde-59-rejected-ai-output.md) — `PASS=9` |
 
 > [!NOTE]
 > **The bronze-immutability guard was red on `main` from 2026-07-31 to 2026-08-03, and it was right
