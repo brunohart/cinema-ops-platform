@@ -134,6 +134,59 @@ script can check rather than something you have to take my word for.
 [![agent](https://img.shields.io/badge/agent-bounded%20tool%20set-4E8C63?style=flat-square&labelColor=15191F)](DECISIONS.md#adr-009--the-agent-interface-is-a-fixed-tool-set-over-gold-not-a-sql-endpoint)
 
 <details>
+<summary>Legible means governed — grain, classification, aggregate floor</summary>
+
+"Trustworthy data layer" is not a design. These are.
+
+### Grain — the most load-bearing sentence in a model
+
+What exactly one row *means*, in one sentence beginning "one row =". If it can't be said cleanly the
+table is secretly two tables, and every number derived from it will be wrong in a way that takes
+months to find.
+
+| table | layer | one row = |
+|---|---|---|
+| `fct_ticket_sale` | gold | one ticket sold — one seat, one showtime, one transaction line |
+| `fct_booking` | gold | one booking — one transaction, whatever number of tickets it contained |
+| `fct_showtime_performance` | gold | one showtime at one screen on one date, with its aggregate outcome |
+| `dim_film` | gold | one film, current attributes only — Type-1 today; SCD2 is the target ([§7](ARCHITECTURE.md#7-field-corrections)) |
+| `dim_customer` | gold | one customer — the only table holding personal data, deliberately narrow |
+| `stg_*` | silver | one validated record from one source, one-to-one with bronze |
+| `raw_*` | bronze | one payload as received, plus ingestion metadata |
+| `quarantine` | bronze | one rejected ingest row, with reason and the original payload retained as evidence |
+
+One ticket and one booking are different grains. A booking-level measure summed across a four-ticket
+row counts the same money four times — which is why `booking_id` sits on `fct_ticket_sale` as a
+degenerate dimension while `booking_total` does not. An identifier is not a measure. It doesn't get
+summed, so it cannot fan out, and the total stays *derivable* rather than stored.
+
+### Classification travels with the column, not the table
+
+Sensitivity is a property of the data. The moment a copy loses its classification, the protection
+stayed behind while the data moved on.
+
+| class | definition | may leave gold | agent-exposed |
+|---|---|---|---|
+| `public` | true of the world, not of a person or the business | yes | yes |
+| `internal` | operational structure — keys, timestamps, types | yes | yes |
+| `commercial` | reveals pricing, margin or performance | yes, aggregated | yes, aggregated |
+| `pseudonym` | identifies a person only via a key held elsewhere | no | no |
+| `PII` | identifies a person directly | **never** | **never** |
+| `excluded` | never ingested at all | n/a | n/a |
+
+### A floor on what counts as an aggregate
+
+Removing names does not make data anonymous. Seat E14, at the 7pm Thursday screening, at one named
+site, is one person — identified by nothing in particular and everything in combination.
+
+- Cohorts below a **minimum group size** return nothing rather than a small number. *An aggregate
+  computed over one ticket is not an aggregate; it is a disclosure with a `GROUP BY` on it.*
+- `seat_label` is never returned in the same response shape as `customer_key`. **The join is the
+  disclosure, not either column.**
+
+</details>
+
+<details>
 <summary>Prove it</summary>
 
 Every task ships with the command that proves it. Done is a green exit code on a clean clone — not
@@ -294,59 +347,6 @@ or the watermark ordering.
 > If every row here is still `PREDICTED` by the end of Day 4, that is itself a finding — either
 > nothing is being genuinely exercised, or failures are happening and going unnoticed.
 > ([ARCHITECTURE §9](ARCHITECTURE.md#9-the-revision-ritual), the all-predicted rule.)
-
-</details>
-
-<details>
-<summary>Legible means governed — grain, classification, aggregate floor</summary>
-
-"Trustworthy data layer" is not a design. These are.
-
-### Grain — the most load-bearing sentence in a model
-
-What exactly one row *means*, in one sentence beginning "one row =". If it can't be said cleanly the
-table is secretly two tables, and every number derived from it will be wrong in a way that takes
-months to find.
-
-| table | layer | one row = |
-|---|---|---|
-| `fct_ticket_sale` | gold | one ticket sold — one seat, one showtime, one transaction line |
-| `fct_booking` | gold | one booking — one transaction, whatever number of tickets it contained |
-| `fct_showtime_performance` | gold | one showtime at one screen on one date, with its aggregate outcome |
-| `dim_film` | gold | one film, current attributes only — Type-1 today; SCD2 is the target ([§7](ARCHITECTURE.md#7-field-corrections)) |
-| `dim_customer` | gold | one customer — the only table holding personal data, deliberately narrow |
-| `stg_*` | silver | one validated record from one source, one-to-one with bronze |
-| `raw_*` | bronze | one payload as received, plus ingestion metadata |
-| `quarantine` | bronze | one rejected ingest row, with reason and the original payload retained as evidence |
-
-One ticket and one booking are different grains. A booking-level measure summed across a four-ticket
-row counts the same money four times — which is why `booking_id` sits on `fct_ticket_sale` as a
-degenerate dimension while `booking_total` does not. An identifier is not a measure. It doesn't get
-summed, so it cannot fan out, and the total stays *derivable* rather than stored.
-
-### Classification travels with the column, not the table
-
-Sensitivity is a property of the data. The moment a copy loses its classification, the protection
-stayed behind while the data moved on.
-
-| class | definition | may leave gold | agent-exposed |
-|---|---|---|---|
-| `public` | true of the world, not of a person or the business | yes | yes |
-| `internal` | operational structure — keys, timestamps, types | yes | yes |
-| `commercial` | reveals pricing, margin or performance | yes, aggregated | yes, aggregated |
-| `pseudonym` | identifies a person only via a key held elsewhere | no | no |
-| `PII` | identifies a person directly | **never** | **never** |
-| `excluded` | never ingested at all | n/a | n/a |
-
-### A floor on what counts as an aggregate
-
-Removing names does not make data anonymous. Seat E14, at the 7pm Thursday screening, at one named
-site, is one person — identified by nothing in particular and everything in combination.
-
-- Cohorts below a **minimum group size** return nothing rather than a small number. *An aggregate
-  computed over one ticket is not an aggregate; it is a disclosure with a `GROUP BY` on it.*
-- `seat_label` is never returned in the same response shape as `customer_key`. **The join is the
-  disclosure, not either column.**
 
 </details>
 
