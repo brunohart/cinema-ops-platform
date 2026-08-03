@@ -41,7 +41,7 @@ git clone https://github.com/brunohart/cinema-ops-platform && cd cinema-ops-plat
 
 Open **http://127.0.0.1:3000** — the asset graph in section 2, live (needs Docker and Python 3.11+).
 
-Nothing but `python3` and `git`: `./scripts/prove_agent_pipeline.sh` and `./scripts/prove_readme_structure.sh`. The full proof table is below the fold.
+Nothing but `python3` (3.11+) and `git`: `./scripts/prove_agent_pipeline.sh` and `./scripts/prove_readme_structure.sh`. The version matters — `scripts/agent_ledger.py` imports `datetime.UTC`, which lands in 3.11, and macOS still ships 3.9 as `python3`. The full proof table is below the fold.
 
 ---
 
