@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-02
 **Issue:** VDE-56
-**Branch:** `cursor/vde-56-vista-scale-limits-6263`
+**Branch:** `cursor/vde-56-scale-limits`
 **Model:** claude-sonnet-5 (implement phase)
 **Tool:** Cursor Cloud · bash · python3
 
@@ -96,7 +96,7 @@ Exit code: 0.
 
 ## Trail
 
-issue **VDE-56** → branch `cursor/vde-56-vista-scale-limits-6263` → this artefact
+issue **VDE-56** → branch `cursor/vde-56-scale-limits` → this artefact
 Commits: `VDE-56: README section 6 — circuit-scale limits and first-week moves; check 10` ·
 `VDE-56: artefact docs/2026-08-02-vde-56-scale-limits.md; Prove-it row` ·
 `VDE-56: ARCHITECTURE.md §10 decision-log row`

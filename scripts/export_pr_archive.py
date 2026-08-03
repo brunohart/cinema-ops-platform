@@ -61,11 +61,22 @@ FIELDS = ",".join(
     ]
 )
 
-# Terms that must never enter the tree. The export is machine-generated from
-# server data, so it gets the same sweep every other file in the repository gets.
-FORBIDDEN = [
-    "hiring", "recruit", "referral", "jopson", "liebmann", "patton", "caicedo",
-    "workable", "linkedin.com", "applicant", "job ad",
+# The export is machine-generated from server-side text that nobody reviewed line
+# by line, so it gets a guard before it lands in the tree. The guard is for shapes,
+# not words: personal contact details have a form, and a form is checkable without
+# maintaining a list of things to be embarrassed about. A denylist of literals is
+# also self-defeating in a public repository — it publishes the very strings it
+# exists to keep out.
+# Tightened against this corpus specifically. A naive email pattern matches the
+# host half of a Postgres DSN (`cinema:cinema@127.0.0.1`), and a naive phone
+# pattern matches commit oids, row counts and ISO dates — in technical prose the
+# loose versions are all false positive and get switched off, which is how a guard
+# becomes decoration. Requiring an alphabetic TLD, and a dialling prefix rather
+# than a bare run of digits, keeps both checks quiet enough to stay on.
+PERSONAL_DATA_PATTERNS = [
+    (r"[\w.+-]+@[\w-]+\.[A-Za-z]{2,}", "email address"),
+    (r"(?:linkedin\.com/in|twitter\.com|x\.com|facebook\.com)/[\w.-]+", "personal profile URL"),
+    (r"(?:\+\d{1,3}[\s.-]|\(\d{2,4}\)\s?)\d[\d\s.-]{5,}\d", "phone-shaped number"),
 ]
 
 
@@ -168,8 +179,11 @@ def compact(pr: dict[str, Any]) -> dict[str, Any]:
 
 
 def sweep(payload: str) -> list[str]:
-    low = payload.lower()
-    return [t for t in FORBIDDEN if t in low]
+    """Return the kinds of personal data found, if any. Shapes, not literals."""
+    return [
+        label for pattern, label in PERSONAL_DATA_PATTERNS
+        if re.search(pattern, payload)
+    ]
 
 
 def render(prs: list[dict[str, Any]]) -> str:
@@ -261,7 +275,7 @@ def main() -> int:
 
     hits = sweep(payload + index)
     if hits:
-        print(f"REFUSING to write — forbidden terms in export: {hits}", file=sys.stderr)
+        print(f"REFUSING to write — personal data in export: {hits}", file=sys.stderr)
         return 2
 
     if args.stdout:

@@ -19,8 +19,9 @@ BEGIN
 END
 $$;
 
--- Connect to the database by name at runtime, not hardcoded — 'cinema_ops' in compose,
--- 'vista' if the DB is ever renamed. The format() call prevents SQL injection on the name.
+-- Connect to the database by name at runtime, not hardcoded — 'cinema_ops' under
+-- compose, whatever it is called wherever this runs. The format() call prevents SQL
+-- injection on the name.
 DO $$
 BEGIN
   EXECUTE format('GRANT CONNECT ON DATABASE %I TO transformer', current_database());
