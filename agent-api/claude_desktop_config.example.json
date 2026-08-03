@@ -1,0 +1,21 @@
+{
+  "_comment": "VDE-46 — Claude Desktop config for cinema-ops MCP server.",
+  "_instructions": [
+    "1. Build: cd agent-api && npm ci && npm run build",
+    "2. Copy this file to ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)",
+    "   or %APPDATA%\\Claude\\claude_desktop_config.json (Windows)",
+    "3. Fill in AGENT_TOKEN (mint with: python3 -m src.cli agent mint-token --label ... --sites ... --tools ...)",
+    "4. Fill in AGENT_DATABASE_URL (postgres DSN for the agent_reader role)",
+    "5. Restart Claude Desktop"
+  ],
+  "mcpServers": {
+    "cinema-ops": {
+      "command": "node",
+      "args": ["/path/to/cinema-ops-platform/agent-api/dist/mcp.js"],
+      "env": {
+        "AGENT_TOKEN": "",
+        "AGENT_DATABASE_URL": ""
+      }
+    }
+  }
+}

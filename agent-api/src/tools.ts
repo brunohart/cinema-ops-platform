@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { logAccess } from "./access_log.js";
 import { executeQuery, type Queryable } from "./execute.js";
 import { QUERIES, type QueryName } from "./queries.js";
 import {
@@ -8,6 +9,13 @@ import {
   SitePerformanceOutputSchema,
 } from "./schemas.js";
 import type { AgentToken } from "./token.js";
+
+export class ToolRefusedError extends Error {
+  readonly name = "ToolRefusedError";
+  constructor(readonly toolName: string, readonly reason: string) {
+    super("tool " + toolName + " refused: " + reason);
+  }
+}
 
 /**
  * MCP tool name → QUERIES entry.
@@ -65,8 +73,11 @@ type ToolOutputMap = {
 };
 
 /**
- * Run one MCP tool: allowlisted query → explicit output schema.
+ * Run one MCP tool: allowed-tools check → allowlisted query → access log.
  * Raw pg rows never leave this function.
+ * Fail-closed: a log write failure propagates as AccessLogUnavailableError.
+ *
+ * Params logged are restricted to from/to/limit/site_ids — no PII (CLAUDE.md §6).
  */
 export async function runTool<T extends ToolName>(
   db: Queryable,
@@ -74,13 +85,57 @@ export async function runTool<T extends ToolName>(
   args: z.infer<typeof DateWindowInputSchema>,
   token: AgentToken,
 ): Promise<ToolOutputMap[T]> {
+  const logParams: Record<string, unknown> = {
+    from: args.from,
+    to: args.to,
+    limit: args.limit,
+    site_ids: token.scope.siteIds,
+  };
+
+  // Allowed-tools gate: enforced when allowedTools is set on the token.
+  if (token.allowedTools !== undefined && !token.allowedTools.includes(toolName)) {
+    const reason = "tool not permitted by token: " + toolName;
+    await logAccess(db, {
+      tokenLabel: token.sub,
+      tool: toolName,
+      params: logParams,
+      rowCount: 0,
+      outcome: "refused",
+      refusalReason: reason,
+    });
+    throw new ToolRefusedError(toolName, reason);
+  }
+
   const queryName = TOOL_TO_QUERY[toolName];
   const def = QUERIES[queryName];
   const outputSchema = TOOL_OUTPUT[toolName];
 
-  const raw = await executeQuery(db, queryName, args, token);
+  let raw: Record<string, unknown>[];
+  try {
+    raw = await executeQuery(db, queryName, args, token);
+  } catch (err) {
+    await logAccess(db, {
+      tokenLabel: token.sub,
+      tool: toolName,
+      params: logParams,
+      rowCount: 0,
+      outcome: "error",
+    });
+    throw err;
+  }
+
   const rows = raw.map((row) => def.row.parse(coerceRow(row)));
-  return outputSchema.parse({ rows }) as ToolOutputMap[T];
+  const output = outputSchema.parse({ rows }) as ToolOutputMap[T];
+
+  await logAccess(db, {
+    tokenLabel: token.sub,
+    tool: toolName,
+    params: logParams,
+    rowCount: rows.length,
+    outcome: "ok",
+  });
+
+  return output;
 }
 
 /** Normalise postgres.js / node-pg quirks before Zod (numeric → number, Date → ISO). */

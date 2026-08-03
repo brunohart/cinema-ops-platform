@@ -1,5 +1,6 @@
 /**
  * VDE-40 — MCP server wrapping allowlisted QUERIES as tools.
+ * VDE-46 — token resolution via AGENT_TOKEN → meta.agent_tokens when DB present.
  *
  * Claude speaks MCP. Each tool maps to one QUERIES entry; descriptions are
  * written for a cinema operator, not a schema reader; every output shape is
@@ -11,7 +12,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createDb, createFixtureDb, type DbHandle } from "./db.js";
+import type { AgentToken } from "./token.js";
 import { tokenFromEnv } from "./token_env.js";
+import { resolveAgentToken } from "./token_db.js";
 import {
   TOOL_DESCRIPTIONS,
   TOOL_INPUT,
@@ -30,12 +33,37 @@ function resolveDb(): DbHandle {
   return createDb(databaseUrl);
 }
 
-export function createMcpServer(db: DbHandle = resolveDb()): McpServer {
+/**
+ * Resolve the server token:
+ * - AGENT_TOKEN + DSN present → resolve via meta.agent_tokens (production path).
+ * - Otherwise → tokenFromEnv() (fixture / inspector path).
+ */
+async function resolveServerToken(db: DbHandle): Promise<AgentToken> {
+  const bearerToken = process.env.AGENT_TOKEN;
+  const databaseUrl =
+    process.env.AGENT_DATABASE_URL ?? process.env.DATABASE_URL;
+
+  if (
+    bearerToken !== undefined &&
+    bearerToken.length > 0 &&
+    databaseUrl !== undefined &&
+    databaseUrl.length > 0 &&
+    process.env.AGENT_MCP_FIXTURE !== "1"
+  ) {
+    return resolveAgentToken(db, bearerToken);
+  }
+
+  return tokenFromEnv();
+}
+
+export function createMcpServer(
+  db: DbHandle = resolveDb(),
+  token: AgentToken = tokenFromEnv(),
+): McpServer {
   const server = new McpServer({
     name: "cinema-ops",
     version: "0.1.0",
   });
-  const token = tokenFromEnv();
 
   for (const toolName of listToolNames()) {
     registerCinemaTool(server, db, toolName, token);
@@ -89,7 +117,8 @@ function titleFor(toolName: ToolName): string {
 
 async function main(): Promise<void> {
   const db = resolveDb();
-  const server = createMcpServer(db);
+  const token = await resolveServerToken(db);
+  const server = createMcpServer(db, token);
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
