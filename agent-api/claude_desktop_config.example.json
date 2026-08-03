@@ -1,5 +1,5 @@
 {
-  "_comment": "VDE-46 — Claude Desktop config for vista-de MCP server.",
+  "_comment": "VDE-46 — Claude Desktop config for cinema-ops MCP server.",
   "_instructions": [
     "1. Build: cd agent-api && npm ci && npm run build",
     "2. Copy this file to ~/Library/Application Support/Claude/claude_desktop_config.json (macOS)",
@@ -9,7 +9,7 @@
     "5. Restart Claude Desktop"
   ],
   "mcpServers": {
-    "vista-de": {
+    "cinema-ops": {
       "command": "node",
       "args": ["/path/to/cinema-ops-platform/agent-api/dist/mcp.js"],
       "env": {

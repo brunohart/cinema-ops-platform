@@ -51,8 +51,8 @@ Run `npm audit` for details.
 
   dist/prove_operator_question.js ok
 
-==> [2/7] config machine-check (claude_desktop_config.example.json — vista-de)
-  server key    : vista-de ok
+==> [2/7] config machine-check (claude_desktop_config.example.json — cinema-ops)
+  server key    : cinema-ops ok
   command       : node ok
   args[0]       : '/path/to/cinema-ops-platform/agent-api/dist/mcp.js' ok
   env['AGENT_TOKEN']: blank + process.env.AGENT_TOKEN in src/ ok

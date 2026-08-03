@@ -29,7 +29,7 @@ echo "  dist/prove_operator_question.js ok"
 
 # ── [2/7] claude_desktop_config.example.json machine-check ──────────────────
 echo ""
-echo "==> [2/7] config machine-check (claude_desktop_config.example.json — vista-de)"
+echo "==> [2/7] config machine-check (claude_desktop_config.example.json — cinema-ops)"
 python3 - <<'PY'
 import json, sys, pathlib
 
@@ -37,10 +37,10 @@ cfg_path = pathlib.Path("claude_desktop_config.example.json")
 cfg = json.loads(cfg_path.read_text())
 
 servers = cfg.get("mcpServers", {})
-assert "vista-de" in servers, (
-    "FAIL: mcpServers key must be 'vista-de', got: " + str(list(servers.keys()))
+assert "cinema-ops" in servers, (
+    "FAIL: mcpServers key must be 'cinema-ops', got: " + str(list(servers.keys()))
 )
-s = servers["vista-de"]
+s = servers["cinema-ops"]
 assert s.get("command") == "node", (
     "FAIL: command must be 'node', got: " + repr(s.get("command"))
 )
@@ -61,7 +61,7 @@ for key, val in env.items():
         "FAIL: env key " + repr(key) + " is in config but " + needle + " not found in agent-api/src/*.ts"
     )
 
-print("  server key    : vista-de ok")
+print("  server key    : cinema-ops ok")
 print("  command       : node ok")
 print("  args[0]       : " + repr(args0) + " ok")
 for key in env:
