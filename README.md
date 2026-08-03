@@ -134,6 +134,111 @@ script can check rather than something you have to take my word for.
 [![agent](https://img.shields.io/badge/agent-bounded%20tool%20set-4E8C63?style=flat-square&labelColor=15191F)](DECISIONS.md#adr-009--the-agent-interface-is-a-fixed-tool-set-over-gold-not-a-sql-endpoint)
 
 <details>
+<summary>An agent is a consumer with no judgement</summary>
+
+This is the sentence the rest of the engineering follows from.
+
+A person handed a customer's email address in an API response makes a decision about what to do with
+it. An agent has no such faculty. It will faithfully relay whatever it receives into whatever context
+it is currently operating in, and its instructions can be rewritten by text it encountered somewhere
+else entirely — a synopsis field, a customer note, a free-text column in a file someone else
+produced. There is no version of *the agent knows not to share that.*
+
+**So the boundary cannot live in the prompt. It has to live in what the tool is physically able to
+return.**
+
+Three consequences, and they are structural rather than procedural:
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**Bounded over flexible**
+
+One tool that runs arbitrary SQL answers every question you haven't thought of yet — and its
+capability is whatever SQL can express against whatever the role can reach. That is not a surface
+anyone can reason about, test, or write assertions against. A fixed set of named, parameterised,
+read-only tools is bounded, and **a bounded surface is the only kind that can be red-teamed.**
+
+*Cost:* every new question needs a new tool, and I will be wrong about which ones matter.
+
+</td>
+<td width="33%" valign="top">
+
+**Absence over redaction**
+
+Redaction means the field is in the response shape and something removed it on the way out — so
+correctness depends on a filter running correctly every time, and a filter can be misconfigured,
+bypassed, or forgotten in a new endpoint. Absence means there is no code path by which the value
+could appear.
+
+*One is a promise about behaviour. The other is a property of the structure.*
+
+</td>
+<td width="33%" valign="top">
+
+**Exclusion over protection**
+
+The safest handling of the most sensitive data is not encryption and not masking — it is never
+landing it. A class of field dropped at the extractor, before it reaches storage, has no copy
+anywhere in the system to govern.
+
+*Most classification schemes don't have that class. Most need it.*
+
+</td>
+</tr>
+</table>
+
+> [!IMPORTANT]
+> An injection-resistance claim with no test behind it is not a security property. It is a hope with
+> good posture. The evaluation layer — including adversarial prompt-injection testing — is built
+> alongside the pipeline rather than added to it.
+
+</details>
+
+<details>
+<summary>Two paths out of a platform</summary>
+
+A platform becomes an ecosystem along two paths, and exhibition is early on both.
+
+```mermaid
+flowchart LR
+    P["cinema management system<br/>a system of record —<br/>built for correctness, not for query"]
+
+    W["the write path<br/><br/>can outsiders build things<br/>that act on the system?"]
+    R["the read path<br/><br/>can anyone ask it a question<br/>it was not designed to answer?"]
+
+    T["Theatrical<br/>opens this side"]
+    C["cinema-ops-platform<br/>this repository"]
+
+    P --> W --> T
+    P --> R --> C
+
+    style P fill:#E8EAED,stroke:#5E6975,color:#111418
+    style W fill:#F2E7D6,stroke:#C08B4F,color:#3A2A12
+    style R fill:#FBF1D5,stroke:#E0B24C,color:#3A2E08
+    style T fill:#FFFFFF,stroke:#8C97A3,color:#111418
+    style C fill:#111418,stroke:#E0B24C,color:#F3F5F7
+```
+
+The read path is furthest behind, and it is where the returns arrive soonest — because nobody has to
+build anything to benefit from it. They only have to be able to ask.
+
+The standard answer used to be a BI tool and an analyst who knew where the bodies were buried. That
+answer is being replaced. The emerging consumer of operational data is an agent: it takes a question
+in language and resolves it against a warehouse. Which changes what *legible* has to mean.
+
+| | a dashboard | an agent-queryable layer |
+|---|---|---|
+| **questions** | chosen in advance, by someone who understood the data | arbitrary, from a questioner who may not know enough to notice a bad answer |
+| **failure** | a wrong number tends to look wrong to the person who commissioned it | a wrong number is relayed, confidently, into whatever context the agent is in |
+| **bar to clear** | readable | correct under questions nobody anticipated |
+
+That is a materially harder standard, and it is not met by pointing a model at a database.
+
+</details>
+
+<details>
 <summary>Legible means governed — grain, classification, aggregate floor</summary>
 
 "Trustworthy data layer" is not a design. These are.
@@ -248,20 +353,27 @@ pytest -q                       # the whole suite
 </details>
 
 <details>
-<summary>Deliberately not built</summary>
+<summary>Governance: the part that is structural</summary>
 
-Each names the first move if I had a week; an item I could not answer that for was cut.
-A gap I have named is worth more than a gap a reviewer finds — it is below the fold for
-length, not for cover.
+Where a rule can be a database grant or a schema, it is one. Enforced beats intended.
 
-- **Real CDC** — rejected on operational, not technical grounds ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
-- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
-- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
-- **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
-- **SCD2 on `dim_film`** — the live model is Type-1 and emits `valid_from`/`valid_to`/`is_current` as constants, so a point-in-time join returns today's attributes for every date; the working snapshot sits unwired in `transform/` ([ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections)). *First week:* move the snapshot into `dbt/`, build `dim_film` from it, and add an asset check that fails when every row is `is_current`.
-- **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
-- **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
-- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
+```sql
+-- sql/init/002_extractor_role.sql
+GRANT USAGE  ON SCHEMA bronze TO extractor;
+GRANT INSERT ON ALL TABLES IN SCHEMA bronze TO extractor;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA bronze
+  GRANT INSERT ON TABLES TO extractor;
+
+-- Belt and braces — even if a broader grant slips in later, strip mutations.
+REVOKE UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA bronze FROM extractor;
+```
+
+The extractor role holds no `UPDATE` grant, so *a bug cannot violate the append-only rule.* The
+kill test in [`sql/init/004_kill_test_extractor_immutable.sql`](sql/init/004_kill_test_extractor_immutable.sql)
+sets the role, attempts an `UPDATE`, and fails loudly if it succeeds. Its recorded output is
+committed under [`docs/`](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md), dated — an artefact
+described is an artefact missing.
 
 </details>
 
@@ -351,27 +463,54 @@ or the watermark ordering.
 </details>
 
 <details>
-<summary>Governance: the part that is structural</summary>
+<summary>Deliberately not built</summary>
 
-Where a rule can be a database grant or a schema, it is one. Enforced beats intended.
+Each names the first move if I had a week; an item I could not answer that for was cut.
+A gap I have named is worth more than a gap a reviewer finds — it is below the fold for
+length, not for cover.
 
-```sql
--- sql/init/002_extractor_role.sql
-GRANT USAGE  ON SCHEMA bronze TO extractor;
-GRANT INSERT ON ALL TABLES IN SCHEMA bronze TO extractor;
+- **Real CDC** — rejected on operational, not technical grounds ([ADR-006](DECISIONS.md#adr-006--watermark-plus-overlap-window-not-cdc)): a replication slot on someone else's production database is an organisational decision, and my consumer stalling becomes their disk filling. *First week:* run a slot against a copy I own and measure WAL growth under a deliberate stall, so the conversation opens with a number.
+- **Backfill orchestration UI** — the pattern is proven (partitioned assets, idempotent merge, watermark-last); the UI is polish on it. *First week:* a `--from/--to` CLI over the existing partitions, with `meta.pipeline_runs` as the progress view.
+- **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
+- **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
+- **SCD2 on `dim_film`** — the live model is Type-1 and emits `valid_from`/`valid_to`/`is_current` as constants, so a point-in-time join returns today's attributes for every date; the working snapshot sits unwired in `transform/` ([ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections)). *First week:* move the snapshot into `dbt/`, build `dim_film` from it, and add an asset check that fails when every row is `is_current`.
+- **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
+- **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
+- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
 
-ALTER DEFAULT PRIVILEGES IN SCHEMA bronze
-  GRANT INSERT ON TABLES TO extractor;
+</details>
 
--- Belt and braces — even if a broader grant slips in later, strip mutations.
-REVOKE UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA bronze FROM extractor;
-```
+<details>
+<summary>Scope, stated deliberately — and what this does not claim</summary>
 
-The extractor role holds no `UPDATE` grant, so *a bug cannot violate the append-only rule.* The
-kill test in [`sql/init/004_kill_test_extractor_immutable.sql`](sql/init/004_kill_test_extractor_immutable.sql)
-sets the role, attempts an `UPDATE`, and fails loudly if it succeeds. Its recorded output is
-committed under [`docs/`](docs/2026-07-31-vde-11-bronze-immutable-kill-test.md), dated — an artefact
-described is an artefact missing.
+An artefact built to be operated and defended completely, not a demonstration of surface area.
+
+- It runs **locally** rather than on managed cloud, so a reviewer can inspect and run the whole thing
+  ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)). No Spark, no Kubernetes,
+  no Snowflake.
+- It holds **no real operator data** and is not trying to become a product.
+- Postgres over DuckDB, because the load-bearing requirement is access control and DuckDB has no role
+  model ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)). At genuine scale this choice does not
+  hold, and the honest answer is a columnar engine — which the medallion layering ports to largely
+  intact.
+- The public Fly demo illustrates the policy in the browser; [ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+  records why this does not contradict ADR-010 — the demo is a fixture illustration, not the managed-cloud primary runtime ADR-010 ruled out.
+
+**What this does not claim:**
+
+That existing platforms have got it wrong. They optimise for correctness, uptime, and not losing
+anyone's money — correctly, and in that order.
+
+That the industry is currently asking for this. Mostly it is not.
+
+The claim is narrower than either: **the write path and the read path are the same project, and the
+second half has barely started.** Theatrical opens one side. This is the work on the other.
+
+The essay's own weakest link is tracked in the same way everything else here is
+([thesis map](docs/thesis-map.md), claims with no mechanism behind them yet): *operators would benefit
+from natural-language access to their own operational data* is asserted, with no user research behind
+it. Closing it takes one conversation with a site or circuit operator, and it is the difference
+between a designer's argument about an industry and an argument grounded in it.
 
 </details>
 
@@ -619,144 +758,6 @@ supplements [ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-clo
 
 </details>
 
-<details>
-<summary>Scope, stated deliberately — and what this does not claim</summary>
-
-An artefact built to be operated and defended completely, not a demonstration of surface area.
-
-- It runs **locally** rather than on managed cloud, so a reviewer can inspect and run the whole thing
-  ([ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)). No Spark, no Kubernetes,
-  no Snowflake.
-- It holds **no real operator data** and is not trying to become a product.
-- Postgres over DuckDB, because the load-bearing requirement is access control and DuckDB has no role
-  model ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)). At genuine scale this choice does not
-  hold, and the honest answer is a columnar engine — which the medallion layering ports to largely
-  intact.
-- The public Fly demo illustrates the policy in the browser; [ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
-  records why this does not contradict ADR-010 — the demo is a fixture illustration, not the managed-cloud primary runtime ADR-010 ruled out.
-
-**What this does not claim:**
-
-That existing platforms have got it wrong. They optimise for correctness, uptime, and not losing
-anyone's money — correctly, and in that order.
-
-That the industry is currently asking for this. Mostly it is not.
-
-The claim is narrower than either: **the write path and the read path are the same project, and the
-second half has barely started.** Theatrical opens one side. This is the work on the other.
-
-The essay's own weakest link is tracked in the same way everything else here is
-([thesis map](docs/thesis-map.md), claims with no mechanism behind them yet): *operators would benefit
-from natural-language access to their own operational data* is asserted, with no user research behind
-it. Closing it takes one conversation with a site or circuit operator, and it is the difference
-between a designer's argument about an industry and an argument grounded in it.
-
-</details>
-
-<details>
-<summary>Two paths out of a platform</summary>
-
-A platform becomes an ecosystem along two paths, and exhibition is early on both.
-
-```mermaid
-flowchart LR
-    P["cinema management system<br/>a system of record —<br/>built for correctness, not for query"]
-
-    W["the write path<br/><br/>can outsiders build things<br/>that act on the system?"]
-    R["the read path<br/><br/>can anyone ask it a question<br/>it was not designed to answer?"]
-
-    T["Theatrical<br/>opens this side"]
-    C["cinema-ops-platform<br/>this repository"]
-
-    P --> W --> T
-    P --> R --> C
-
-    style P fill:#E8EAED,stroke:#5E6975,color:#111418
-    style W fill:#F2E7D6,stroke:#C08B4F,color:#3A2A12
-    style R fill:#FBF1D5,stroke:#E0B24C,color:#3A2E08
-    style T fill:#FFFFFF,stroke:#8C97A3,color:#111418
-    style C fill:#111418,stroke:#E0B24C,color:#F3F5F7
-```
-
-The read path is furthest behind, and it is where the returns arrive soonest — because nobody has to
-build anything to benefit from it. They only have to be able to ask.
-
-The standard answer used to be a BI tool and an analyst who knew where the bodies were buried. That
-answer is being replaced. The emerging consumer of operational data is an agent: it takes a question
-in language and resolves it against a warehouse. Which changes what *legible* has to mean.
-
-| | a dashboard | an agent-queryable layer |
-|---|---|---|
-| **questions** | chosen in advance, by someone who understood the data | arbitrary, from a questioner who may not know enough to notice a bad answer |
-| **failure** | a wrong number tends to look wrong to the person who commissioned it | a wrong number is relayed, confidently, into whatever context the agent is in |
-| **bar to clear** | readable | correct under questions nobody anticipated |
-
-That is a materially harder standard, and it is not met by pointing a model at a database.
-
-</details>
-
-<details>
-<summary>An agent is a consumer with no judgement</summary>
-
-This is the sentence the rest of the engineering follows from.
-
-A person handed a customer's email address in an API response makes a decision about what to do with
-it. An agent has no such faculty. It will faithfully relay whatever it receives into whatever context
-it is currently operating in, and its instructions can be rewritten by text it encountered somewhere
-else entirely — a synopsis field, a customer note, a free-text column in a file someone else
-produced. There is no version of *the agent knows not to share that.*
-
-**So the boundary cannot live in the prompt. It has to live in what the tool is physically able to
-return.**
-
-Three consequences, and they are structural rather than procedural:
-
-<table>
-<tr>
-<td width="33%" valign="top">
-
-**Bounded over flexible**
-
-One tool that runs arbitrary SQL answers every question you haven't thought of yet — and its
-capability is whatever SQL can express against whatever the role can reach. That is not a surface
-anyone can reason about, test, or write assertions against. A fixed set of named, parameterised,
-read-only tools is bounded, and **a bounded surface is the only kind that can be red-teamed.**
-
-*Cost:* every new question needs a new tool, and I will be wrong about which ones matter.
-
-</td>
-<td width="33%" valign="top">
-
-**Absence over redaction**
-
-Redaction means the field is in the response shape and something removed it on the way out — so
-correctness depends on a filter running correctly every time, and a filter can be misconfigured,
-bypassed, or forgotten in a new endpoint. Absence means there is no code path by which the value
-could appear.
-
-*One is a promise about behaviour. The other is a property of the structure.*
-
-</td>
-<td width="33%" valign="top">
-
-**Exclusion over protection**
-
-The safest handling of the most sensitive data is not encryption and not masking — it is never
-landing it. A class of field dropped at the extractor, before it reaches storage, has no copy
-anywhere in the system to govern.
-
-*Most classification schemes don't have that class. Most need it.*
-
-</td>
-</tr>
-</table>
-
-> [!IMPORTANT]
-> An injection-resistance claim with no test behind it is not a security property. It is a hope with
-> good posture. The evaluation layer — including adversarial prompt-injection testing — is built
-> alongside the pipeline rather than added to it.
-
-</details>
 
 ---
 
