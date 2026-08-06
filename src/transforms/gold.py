@@ -317,7 +317,12 @@ def fct_booking(
         date_key = dates.get(day)
         if date_key is None:
             continue
-        site_key = sites.get(c["cinema_id"]) if c.get("cinema_id") is not None else None
+        # str() because dim_site keys site_code as str(cinema_id) — without the
+        # cast an integer cinema_id misses every site and silently lands on the
+        # Unknown member, which reads as conformance rather than a failed join.
+        # The dbt model is safe by typing (cinema_id is text in silver); this is
+        # the pure-Python path, where the payload dict carries whatever it got.
+        site_key = sites.get(str(c["cinema_id"])) if c.get("cinema_id") is not None else None
         if site_key is None:
             site_key = unknown_site
         film_id = None

@@ -12,15 +12,21 @@ from psycopg.rows import dict_row
 
 from agent.limits import STATEMENT_TIMEOUT
 
+DEFAULT_DSN = "postgresql://agent_reader:agent_reader@127.0.0.1:5432/cinema_ops"
+
 
 def dsn_from_env() -> str:
-    """Prefer the agent role DSN; fall back to the local compose superuser for proofs."""
-    return os.environ.get(
-        "AGENT_DATABASE_URL",
-        os.environ.get(
-            "DB",
-            "postgresql://agent_reader:agent_reader@127.0.0.1:5432/cinema_ops",
-        ),
+    """Prefer the agent role DSN; fall back to the local compose superuser for proofs.
+
+    Blank counts as unset. ``.env.example`` ships every key blank (VDE-51), so a
+    sourced ``.env`` sets ``AGENT_DATABASE_URL=""`` — a get() default never fires
+    on that, and the empty DSN reached ``psycopg.connect("")``, which silently
+    falls through to libpq's own environment instead of the default above.
+    """
+    return (
+        os.environ.get("AGENT_DATABASE_URL")
+        or os.environ.get("DB")
+        or DEFAULT_DSN
     )
 
 

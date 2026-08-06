@@ -43,6 +43,8 @@ Open **http://127.0.0.1:3000** — the asset graph in section 2, live (needs Doc
 
 Nothing but `python3` (3.11+) and `git`: `./scripts/prove_agent_pipeline.sh` and `./scripts/prove_readme_structure.sh`. The version matters — `scripts/agent_ledger.py` imports `datetime.UTC`, which lands in 3.11, and macOS still ships 3.9 as `python3`. The full proof table is below the fold.
 
+<img src="docs/assets/three-ways-in.svg" alt="Three ways into this repository: run it with scripts/quickstart.sh, read the argument in docs/the-read-path.md, or start at the field corrections in ARCHITECTURE.md section 7." width="100%">
+
 ---
 
 ## The agent interface, and why it is safe
@@ -284,10 +286,21 @@ stayed behind while the data moved on.
 Removing names does not make data anonymous. Seat E14, at the 7pm Thursday screening, at one named
 site, is one person — identified by nothing in particular and everything in combination.
 
-- Cohorts below a **minimum group size** return nothing rather than a small number. *An aggregate
-  computed over one ticket is not an aggregate; it is a disclosure with a `GROUP BY` on it.*
+- Cohorts below a **minimum group size** (`MIN_GROUP_SIZE = 5`) return nothing rather than a small
+  number. *An aggregate computed over one ticket is not an aggregate; it is a disclosure with a
+  `GROUP BY` on it.* Suppression is **counted, not silent** — the response carries `suppressed_rows`,
+  because a caller who cannot tell filtering from absence reads the gap as "no trading", which trades
+  one wrong answer for another.
 - `seat_label` is never returned in the same response shape as `customer_key`. **The join is the
   disclosure, not either column.**
+
+> [!NOTE]
+> This rule was a sentence before it was a filter. Until 2026-08-06 the floor was enforced in the
+> fixture demo and the TypeScript path but not in either Postgres-backed one — and
+> `get_session_occupancy`'s docstring claimed a floor the function did not contain.
+> [ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections) records it, along with three other
+> corrections from the same pass. A governance rule that lives only in the surface a reviewer runs is
+> a demonstration of the rule, not the rule.
 
 </details>
 
@@ -704,11 +717,13 @@ scripts/
   (other scripts)          one proof command per claim
 
 demo/
-  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57)
+  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57);
+                           takes DEMO_SITE_KEY / DEMO_DATE_KEY and fails on an
+                           unresolved answer, not merely on a failed call
   inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
-tests/                     151 collected — 146 pass, 4 skip without a throwaway Postgres,
+tests/                     168 collected — 163 pass, 4 skip without a throwaway Postgres,
                            1 integration deselected; all HTTP mocked, no live API calls
 ```
 
@@ -761,6 +776,48 @@ supplements [ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-clo
 
 </details>
 
+
+<details>
+<summary>Colophon — why the diagrams look like this</summary>
+
+I came to data engineering from design, and the documents here are built the way the pipeline is:
+every choice stated, and stated once. This section is the same discipline pointed at the artefact
+you are currently reading.
+
+<img src="docs/assets/palette.svg" alt="The colour system: bronze #C08B4F as landed, slate #8C97A3 conformed, gold #E0B24C serving, green #4E8C63 structural, red #A65B63 quarantine." width="100%">
+
+**Colour carries the layer, not the mood.** Bronze, slate and gold are bronze, silver and gold — the
+three medallion layers — and they mean nothing else anywhere in the repository — not in the banner, not in the mermaid blocks, not in
+the badges. Green is reserved for a guarantee that is *structural* rather than procedural: a grant, a
+missing column, a type with no field for the thing. Red appears in one place, quarantine, because a
+rejected row is the only state in this system that is neither success nor failure. A reader who
+learns five colours once can read every diagram after that without a legend.
+
+**Monospace is for things you could type; sans-serif is for things I am claiming.** Commands, keys,
+file paths and hex values are set in mono because they are literal — you can copy them and they will
+work. Prose is set in sans because it is an argument, and an argument should not borrow the
+authority of a terminal. Where the two meet — a stated guess marked `est.`, a `PREDICTED` status —
+the mono is doing the load-bearing work, which is the point.
+
+**Every diagram has a job that prose was doing worse.** The lineage graph is a screenshot because a
+drawn version would be a claim rather than evidence. The triple lock is drawn because three
+independent mechanisms saying one thing is a *shape*, and a shape survives a skim that a bullet list
+does not. The four-shapes flow is mermaid rather than hand-drawn SVG because it changes when the
+pipeline changes, and a diagram that is expensive to update is a diagram that goes stale. Nothing
+here is illustrated for texture.
+
+**The dark treatment is a decision with a cost.** The SVGs are dark-only, so on a light GitHub theme
+they sit as deliberate panels rather than adapting. I took that trade for one reason: the palette
+above only holds its meaning at one set of values, and a theme-responsive version would need a second
+set — at which point bronze is two colours and the legend I just claimed you would not need becomes
+necessary. *What would change my mind:* a reader telling me the dark panels read as broken rather
+than as chosen.
+
+**Length is a cost, which is why most of this is folded.** The above-fold README is capped at 1300
+words and `./scripts/prove_readme_structure.sh` fails the build if it grows — the same forcing
+function as everywhere else here. A document that can only get longer is a document nobody finishes.
+
+</details>
 
 ---
 

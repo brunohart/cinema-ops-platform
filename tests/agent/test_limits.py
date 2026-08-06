@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
+from agent.catalog import MIN_GROUP_SIZE
 from agent.limits import MAX_ROWS, ToolLimit, effective_limit
 from agent.site_performance import get_site_performance
 
@@ -61,7 +62,10 @@ def test_get_site_performance_sets_truncated_when_clipped() -> None:
             "cinema_id": "SYL",
             "screen_id": "SCR-1",
             "show_date": date(2026, 7, 31),
-            "seats_sold": 1,
+            # Above MIN_GROUP_SIZE: these cases are about the row budget, and a
+            # fixture under the §6d floor would be suppressed before the
+            # truncation assertion could say anything about limits.
+            "seats_sold": 42,
             "seats_capacity": 100,
             "gross_revenue": Decimal("10.00"),
         }
@@ -88,7 +92,10 @@ def test_get_site_performance_truncated_false_when_short_page() -> None:
             "cinema_id": "SYL",
             "screen_id": "SCR-1",
             "show_date": date(2026, 7, 31),
-            "seats_sold": 1,
+            # Above MIN_GROUP_SIZE: these cases are about the row budget, and a
+            # fixture under the §6d floor would be suppressed before the
+            # truncation assertion could say anything about limits.
+            "seats_sold": 42,
             "seats_capacity": 100,
             "gross_revenue": Decimal("10.00"),
         }
@@ -101,3 +108,46 @@ def test_get_site_performance_truncated_false_when_short_page() -> None:
 def test_get_site_performance_refuses_limit_above_max() -> None:
     with pytest.raises(ValueError, match="1..500"):
         get_site_performance(_fake_conn([]), limit=501)
+
+
+def _showtime(key: str, seats_sold: int) -> dict[str, Any]:
+    return {
+        "showtime_key": key,
+        "cinema_id": "SYL",
+        "screen_id": "SCR-1",
+        "show_date": date(2026, 7, 31),
+        "seats_sold": seats_sold,
+        "seats_capacity": 100,
+        "gross_revenue": Decimal("10.00"),
+    }
+
+
+def test_get_site_performance_suppresses_below_min_group_size() -> None:
+    """ARCHITECTURE §6d — a showtime under the floor is a disclosure, not an aggregate."""
+    rows = [_showtime("S-1", MIN_GROUP_SIZE - 1), _showtime("S-2", MIN_GROUP_SIZE)]
+    out = get_site_performance(_fake_conn(rows), limit=10)
+
+    assert [r["showtime_key"] for r in out["rows"]] == ["S-2"]
+    assert out["suppressed_rows"] == 1
+    assert out["min_group_size"] == MIN_GROUP_SIZE
+
+
+def test_suppression_is_reported_not_silent() -> None:
+    """A caller that cannot tell filtering from absence reads the gap as 'no trading'."""
+    rows = [_showtime(f"S-{i}", 1) for i in range(3)]
+    out = get_site_performance(_fake_conn(rows), limit=10)
+
+    assert out["rows"] == []
+    assert out["suppressed_rows"] == 3
+
+
+def test_truncation_and_suppression_are_reported_separately() -> None:
+    """`truncated` must keep meaning 'the row budget bound', not 'rows went missing'."""
+    rows = [_showtime("S-1", 1), _showtime("S-2", 50)]
+    out = get_site_performance(_fake_conn(rows), limit=1)
+
+    # fetch_limit was 2, two rows came back, so the budget bound — and separately
+    # the surviving page was then filtered by the group-size floor.
+    assert out["truncated"] is True
+    assert out["rows"] == []
+    assert out["suppressed_rows"] == 1
