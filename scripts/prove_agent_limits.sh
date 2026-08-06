@@ -100,13 +100,25 @@ curl -sf "http://${HOST}:${PORT}/healthz" >/dev/null
 echo "==> proof curl (limit=100000 must clip to 500, truncated=true)"
 RESP="$(curl -s -H "Authorization: Bearer ${TOKEN}" \
   "http://${HOST}:${PORT}/tools/get_site_performance?limit=100000")"
-echo "$RESP" | jq '{row_count: (.rows|length), truncated, limit}'
+echo "$RESP" | jq '{row_count: (.rows|length), suppressed_rows, truncated, limit}'
 
 ROW_COUNT="$(echo "$RESP" | jq '.rows|length')"
+SUPPRESSED="$(echo "$RESP" | jq '.suppressed_rows')"
 TRUNCATED="$(echo "$RESP" | jq '.truncated')"
 
-if [[ "$ROW_COUNT" != "500" ]]; then
-  echo "FAIL: expected 500 rows, got ${ROW_COUNT}" >&2
+# The row budget bound at 500. Some of those 500 are then withheld by the
+# ARCHITECTURE §6d group-size floor — the seed spreads seats_sold over 1..80, so
+# rows below MIN_GROUP_SIZE are suppressed. Asserting on the sum keeps this a
+# proof about the *limit* while making the suppression visible rather than
+# letting it quietly weaken the number this check exists to pin.
+BUDGETED=$(( ROW_COUNT + SUPPRESSED ))
+if [[ "$BUDGETED" != "500" ]]; then
+  echo "FAIL: expected 500 rows within the budget (returned + suppressed), got ${BUDGETED}" >&2
+  echo "      rows=${ROW_COUNT} suppressed=${SUPPRESSED}" >&2
+  exit 1
+fi
+if [[ "$SUPPRESSED" -lt 1 ]]; then
+  echo "FAIL: seed spans seats_sold 1..80, so the §6d floor must suppress something" >&2
   exit 1
 fi
 if [[ "$TRUNCATED" != "true" ]]; then
