@@ -13,9 +13,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-DB_URL="${DATABASE_URL:-postgresql://cinema:cinema@localhost:5432/cinema_ops}"
+# $DB is the migration-owner DSN everywhere else in scripts/ (prove_agent_limits.sh,
+# prove_least_privilege_roles.sh, prove_fact_grain.sh …), while .env.example documents
+# DATABASE_URL as the read-only `api` role. This script read the owner DSN out of
+# DATABASE_URL, so following the documented .env made it try to apply DDL as `api`
+# and fail with "permission denied for database cinema_ops". $DB first, DATABASE_URL
+# only as a legacy fallback.
+DB_URL="${DB:-${DATABASE_URL:-postgresql://cinema:cinema@localhost:5432/cinema_ops}}"
 AGENT_URL="${AGENT_DATABASE_URL:-postgresql://agent_reader:agent_reader@localhost:5432/cinema_ops}"
-export DATABASE_URL="$DB_URL"
+export DB="$DB_URL"
 export AGENT_DATABASE_URL="$AGENT_URL"
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 export PGPASSWORD="${PGPASSWORD:-cinema}"

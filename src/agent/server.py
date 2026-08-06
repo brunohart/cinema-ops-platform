@@ -244,11 +244,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="cinema-ops agent tools server (VDE-44 hard limits + VDE-45 refusal)"
     )
-    parser.add_argument("--host", default=os.environ.get("AGENT_TOOLS_HOST", DEFAULT_HOST))
+    # `or` rather than a get() default: .env.example ships every key blank (VDE-51),
+    # so a sourced .env sets these to "" — present, and empty. A get() default only
+    # fires on absence, so `AGENT_TOOLS_HOST=` bound 0.0.0.0 instead of loopback and
+    # `AGENT_TOOLS_PORT=` raised ValueError on int("") before argparse ever ran.
+    parser.add_argument("--host", default=os.environ.get("AGENT_TOOLS_HOST") or DEFAULT_HOST)
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("AGENT_TOOLS_PORT", str(DEFAULT_PORT))),
+        default=int(os.environ.get("AGENT_TOOLS_PORT") or DEFAULT_PORT),
     )
     parser.add_argument("--dsn", default=None, help="Override AGENT_DATABASE_URL / DB")
     parser.add_argument(

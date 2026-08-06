@@ -199,11 +199,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--host",
-        # `or`, not a get() default — a blank DEMO_HOST from a sourced .env is
-        # present-and-empty, which get() passes straight through. Same fix as
-        # agent/server.py; here it only mattered for the printed URL, because
-        # DEFAULT_HOST is already 0.0.0.0 for the container.
-        default=os.environ.get("DEMO_HOST") or DEFAULT_HOST,
+        default=os.environ.get("DEMO_HOST", DEFAULT_HOST),
     )
     _port_default = int(
         os.environ.get("PORT")

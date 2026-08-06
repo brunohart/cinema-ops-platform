@@ -27,8 +27,26 @@ BROKERS="${BROKERS:-${KAFKA_BOOTSTRAP:-localhost:19092}}"
 TOPIC="ticketing.bookings"
 DLQ="ticketing.bookings.dlq"
 
+# The repo's own toolchain is uv (CI runs `uv sync --frozen`), and a uv-created
+# venv ships no pip — so `python3 -m pip install` died with "No module named pip"
+# on an environment built exactly the way the README says to build it. Install
+# only when the deps are actually missing, and use whichever installer is present.
+ensure_deps() {
+  if python3 -c "import pytest, pydantic" 2>/dev/null; then
+    return 0
+  fi
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install -e '.[dev]' -q
+  elif python3 -m pip --version >/dev/null 2>&1; then
+    python3 -m pip install -e '.[dev]' -q
+  else
+    echo "FAIL: neither uv nor pip available to install the [dev] extra" >&2
+    exit 1
+  fi
+}
+
 echo "==> unit proof (mock broker; green on a clean clone)"
-python3 -m pip install -e '.[dev]' -q
+ensure_deps
 python3 -m pytest tests/extractors/test_events.py -q
 
 if [[ "${SKIP_LIVE:-0}" == "1" ]]; then
@@ -37,7 +55,11 @@ if [[ "${SKIP_LIVE:-0}" == "1" ]]; then
 fi
 
 if ! python3 -c "import confluent_kafka" 2>/dev/null; then
-  python3 -m pip install 'confluent-kafka>=2.3' -q
+  if command -v uv >/dev/null 2>&1; then
+    uv pip install 'confluent-kafka>=2.3' -q
+  else
+    python3 -m pip install 'confluent-kafka>=2.3' -q
+  fi
 fi
 
 broker_up() {

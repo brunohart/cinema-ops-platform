@@ -284,10 +284,21 @@ stayed behind while the data moved on.
 Removing names does not make data anonymous. Seat E14, at the 7pm Thursday screening, at one named
 site, is one person — identified by nothing in particular and everything in combination.
 
-- Cohorts below a **minimum group size** return nothing rather than a small number. *An aggregate
-  computed over one ticket is not an aggregate; it is a disclosure with a `GROUP BY` on it.*
+- Cohorts below a **minimum group size** (`MIN_GROUP_SIZE = 5`) return nothing rather than a small
+  number. *An aggregate computed over one ticket is not an aggregate; it is a disclosure with a
+  `GROUP BY` on it.* Suppression is **counted, not silent** — the response carries `suppressed_rows`,
+  because a caller who cannot tell filtering from absence reads the gap as "no trading", which trades
+  one wrong answer for another.
 - `seat_label` is never returned in the same response shape as `customer_key`. **The join is the
   disclosure, not either column.**
+
+> [!NOTE]
+> This rule was a sentence before it was a filter. Until 2026-08-06 the floor was enforced in the
+> fixture demo and the TypeScript path but not in either Postgres-backed one — and
+> `get_session_occupancy`'s docstring claimed a floor the function did not contain.
+> [ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections) records it, along with three other
+> corrections from the same pass. A governance rule that lives only in the surface a reviewer runs is
+> a demonstration of the rule, not the rule.
 
 </details>
 
@@ -704,11 +715,13 @@ scripts/
   (other scripts)          one proof command per claim
 
 demo/
-  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57)
+  ask.py                   beat 5: invoke get_site_revenue, print outcome (VDE-57);
+                           takes DEMO_SITE_KEY / DEMO_DATE_KEY and fails on an
+                           unresolved answer, not merely on a failed call
   inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
-tests/                     151 collected — 146 pass, 4 skip without a throwaway Postgres,
+tests/                     168 collected — 163 pass, 4 skip without a throwaway Postgres,
                            1 integration deselected; all HTTP mocked, no live API calls
 ```
 

@@ -133,10 +133,18 @@ if [[ "$CODE" != "401" ]]; then
 fi
 
 echo "==> statement_timeout is 5s on agent / agent_reader sessions"
+# Take host/port/dbname from $DB rather than hardcoding 127.0.0.1:5432. The rest of
+# this script already honours $DB (and README documents DB_HOST_PORT for exactly the
+# port-collision case); this one check did not, so on a stack moved off 5432 it
+# silently probed whatever else was listening there.
+PG_HOST="$(python3 -c 'import sys,urllib.parse as u; p=u.urlparse(sys.argv[1]); print(p.hostname or "127.0.0.1")' "$DB_URL")"
+PG_PORT="$(python3 -c 'import sys,urllib.parse as u; p=u.urlparse(sys.argv[1]); print(p.port or 5432)' "$DB_URL")"
+PG_DB="$(python3 -c 'import sys,urllib.parse as u; p=u.urlparse(sys.argv[1]); print((p.path or "/cinema_ops").lstrip("/"))' "$DB_URL")"
+
 check_timeout() {
   local role="$1" pass="$2"
   local got
-  got="$(PGPASSWORD="$pass" psql -h 127.0.0.1 -U "$role" -d cinema_ops -Atc 'SHOW statement_timeout')"
+  got="$(PGPASSWORD="$pass" psql -h "$PG_HOST" -p "$PG_PORT" -U "$role" -d "$PG_DB" -Atc 'SHOW statement_timeout')"
   echo "${role} statement_timeout=${got}"
   if [[ "$got" != "5s" && "$got" != "5000ms" ]]; then
     echo "FAIL: expected ${role} statement_timeout=5s, got '${got}'" >&2
