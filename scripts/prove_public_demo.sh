@@ -388,6 +388,110 @@ else
   echo "(section 14 skipped — PUBLIC_BASE_URL not set)"
 fi
 
+# ── Section 15: Vercel entry point re-exports, and does not reimplement ───────
+# VDE-62. The demo now has two hosts. The failure this guards is not a broken
+# deploy — it is a working one that drifts: someone patches a refusal into
+# api/index.py because that is the file the live URL runs, and the Fly image and
+# the local server keep the old behaviour. Grepping for "it looks the same" would
+# not catch that, so the check is structural: api/index.py may bind the handler
+# and nothing more. Every route, status code and refusal has one definition.
+echo "=== section 15: Vercel entry point re-exports DemoHandler ==="
+"$PYTHON" - <<'PY'
+import ast
+import json
+import sys
+from pathlib import Path
+
+root = Path(".")
+
+entry_path = root / "api" / "index.py"
+if not entry_path.exists():
+    print("FAIL: api/index.py is missing (VDE-62 Vercel entry point)")
+    sys.exit(1)
+
+tree = ast.parse(entry_path.read_text())
+
+# It must import the shared handler...
+imports_handler = any(
+    isinstance(node, ast.ImportFrom)
+    and node.module == "agent.demo_server"
+    and any(alias.name == "DemoHandler" for alias in node.names)
+    for node in ast.walk(tree)
+)
+if not imports_handler:
+    print("FAIL: api/index.py does not import DemoHandler from agent.demo_server")
+    sys.exit(1)
+
+# ...bind it to the name Vercel invokes...
+binds_handler = any(
+    isinstance(node, ast.Assign)
+    and any(getattr(t, "id", None) == "handler" for t in node.targets)
+    and getattr(node.value, "id", None) == "DemoHandler"
+    for node in ast.walk(tree)
+)
+if not binds_handler:
+    print("FAIL: api/index.py does not bind `handler = DemoHandler`")
+    sys.exit(1)
+
+# ...and define no request handling of its own. A class here is a subclass
+# waiting to override a refusal; a do_* function is one outright.
+defined = [
+    node.name
+    for node in tree.body
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+]
+if defined:
+    print(f"FAIL: api/index.py defines {defined} — the two hosts must share one handler")
+    sys.exit(1)
+
+# And across the demo's real import graph, do_GET is defined exactly once.
+# Scoped to what the entry point actually imports, not to src/agent/*.py —
+# agent.server defines its own do_GET for the scoped-token server on :8787 and
+# is no part of this surface. An earlier draft of this check swept the whole
+# package and failed on that file, which is the check being wrong, not the code.
+sys.path.insert(0, str((root / "src").resolve()))
+import importlib.util
+
+spec = importlib.util.spec_from_file_location("vercel_entry", entry_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+graph = sorted(
+    Path(mod.__file__).as_posix()
+    for name, mod in sys.modules.items()
+    if name.startswith("agent") and getattr(mod, "__file__", None)
+)
+owners = [p for p in graph if "def do_GET" in Path(p).read_text()]
+if len(owners) != 1 or not owners[0].endswith("src/agent/demo_server.py"):
+    print(f"FAIL: do_GET defined in {owners}; expected only src/agent/demo_server.py")
+    sys.exit(1)
+
+cfg_path = root / "vercel.json"
+if not cfg_path.exists():
+    print("FAIL: vercel.json is missing")
+    sys.exit(1)
+cfg = json.loads(cfg_path.read_text())
+
+# Without the catch-all rewrite, /healthz and /tools/* are 404s served by the
+# filesystem and only /api/index reaches the handler.
+rewrites = cfg.get("rewrites") or []
+if not any(
+    r.get("source") == "/(.*)" and r.get("destination") == "/api/index" for r in rewrites
+):
+    print("FAIL: vercel.json must rewrite /(.*) to /api/index")
+    sys.exit(1)
+
+# Without includeFiles, the function bundle ships api/index.py with no src/agent
+# beside it and every request is a cold ImportError.
+include = (cfg.get("functions") or {}).get("api/index.py", {}).get("includeFiles")
+if include != "src/agent/**":
+    print(f"FAIL: vercel.json functions['api/index.py'].includeFiles={include!r}, expected 'src/agent/**'")
+    sys.exit(1)
+
+print("ok — api/index.py re-exports the shared handler; vercel.json routes and bundles it")
+PY
+echo "ok [vercel_entry_reexports_shared_handler]"
+
 echo
-echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image (14 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
+echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image, and both hosts share one handler (15 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
 exit 0

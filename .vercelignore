@@ -1,0 +1,11 @@
+# The Vercel deploy carries the public demo surface only (VDE-62): api/index.py
+# plus the stdlib-only modules it imports. Everything else in this repository is
+# the platform — Postgres, dbt, Dagster, the MCP server — and has no business in
+# a function bundle that is deliberately dependency-free (ADR-015).
+*
+!api
+!api/**
+!src
+!src/agent
+!src/agent/*.py
+!vercel.json

@@ -479,7 +479,7 @@ length, not for cover.
 - **A live Claude Desktop session against the warehouse** — the MCP server, access-log writes and `claude_desktop_config.example.json` exist and are proven (VDE-46, `prove_operator_question.sh`); a real session needs a minted token and a live Postgres DSN, which is configuration rather than build. *First week:* mint a scoped token against the compose stack and record one real session end to end.
 - **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
 - **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
-- **A deployed public demo** — `fly.toml` is committed but `deploy_fly.sh` has not been run, and `cinema-ops-platform-demo.fly.dev` does not resolve. *First week:* deploy it, or delete the config rather than imply a URL exists.
+- **A deployed public demo** — still the honest answer, but the reason moved. `fly.toml` was committed and `deploy_fly.sh` never run, so `cinema-ops-platform-demo.fly.dev` was NXDOMAIN for the eighteen days this README pointed at it — a URL published on the strength of a config file, which is the failure this section exists to prevent and did not. VDE-62 built the deploy path that does not need a Fly account (`api/index.py`, `vercel.json`, `scripts/deploy_vercel.sh`) and stopped the README naming an address before one answers. What is still missing is the deploy itself: it needs a Vercel credential this machine does not hold. *First week:* run `./scripts/deploy_vercel.sh`, paste the URL it prints into this README, and re-run `prove_public_demo.sh` with `PUBLIC_BASE_URL` set so section 14 checks the live surface rather than skipping.
 
 </details>
 
@@ -686,7 +686,12 @@ transform/                 NOT wired in. The VDE-27 SCD2 snapshot spike, kept as
 mcp/                       bounded MCP tool surface (stdio) — subject of the eval suite
 evals/mcp.yaml             Promptfoo contract / scope-refusal / PII-absence assertions
 Dockerfile.demo            stdlib-only Fly demo image; no pip install; USER 10001 (VDE-54)
-fly.toml                   Fly.io app config for cinema-ops-platform-demo (uses Dockerfile.demo)
+fly.toml                   Fly.io app config for cinema-ops-platform-demo (uses Dockerfile.demo).
+                           Second deploy path, not the live one — never run (VDE-62)
+vercel.json                Vercel config for the live demo: every path rewritten to the one
+                           function, src/agent/** bundled with it (VDE-62)
+api/index.py               Vercel entry point — re-exports agent.demo_server.DemoHandler and
+                           defines nothing else, so the two hosts cannot disagree (VDE-62)
 src/agent/demo_server.py   public demo server (VDE-54); reuses real policy layer
 src/agent/demo_data.py     fixture rows + demo token table (sha256-keyed)
 src/agent/catalog.py       tool names, descriptions, columns, PII-absent list (stdlib)
@@ -746,15 +751,19 @@ curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
   http://127.0.0.1:8080/tools | python3 -m json.tool
 ```
 
-**After `scripts/deploy_fly.sh` runs with a Fly account** (not yet deployed — `deploy_fly.sh` exits 2
-without `flyctl` in `PATH`), the same curls point at:
+**On the public host**, the same curls point at `https://<host>/tools/list_sessions` and nothing else
+changes — `api/index.py` binds `agent.demo_server.DemoHandler` and defines nothing of its own, so
+the bearer check, the scope refusal and the row shapes are the same code that just ran locally.
 
-```
-https://cinema-ops-platform-demo.fly.dev/tools/list_sessions
-```
+The address is deliberately not printed here until a deploy has answered on it. This README used to
+name `cinema-ops-platform-demo.fly.dev` as that address; `scripts/deploy_fly.sh` was never run, so
+the name was NXDOMAIN the entire time it was written down (VDE-62,
+[ADR-015 amendment](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)).
+`scripts/deploy_vercel.sh` prints the live URL and exits 0 only after `/healthz` answers 200 and the
+403 scope refusal is reproduced against it; run it and paste the URL here, in the same commit.
 
 Every response carries `X-Cinema-Ops-Dataset: fixture` and `"dataset":"fixture"` — the demo cannot
-be mistaken for live data. No Postgres, no secrets on the Fly app. The same policy layer
+be mistaken for live data. No Postgres, no secrets on the public host. The same policy layer
 (`agent.refuse`) enforces the scoping rules as the local docker-compose environment
 ([ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
 supplements [ADR-010](DECISIONS.md#adr-010--local-docker-compose-not-managed-cloud)).

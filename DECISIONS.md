@@ -520,6 +520,22 @@ Concrete choices:
 - Entry point `python3 -m agent.demo_server` with `PYTHONPATH=src`. The demo modules must not import `agent.tools`, `agent.limits`, or `src.cli` — no DB driver anywhere in the import graph.
 - Fly concurrency: `type=requests soft=20 hard=40`. No app-level rate limiting; Fly handles machine scaling.
 
+**Amendment · 2026-08-19 (VDE-62) — the host changed; nothing above it did.** This ADR named Fly.io
+as the deploy target and the README printed `cinema-ops-platform-demo.fly.dev` as the address the
+public curls would reach. `scripts/deploy_fly.sh` was never run — it requires `flyctl` in `PATH` and
+`FLY_API_TOKEN` set, and neither has ever existed on the machine that built this repository — so
+that hostname was NXDOMAIN from the day it was written. The ADR committed to a host it had not
+paid for, which is the same error as a watermark written before the write succeeds: the record
+claimed a state that the world had not reached.
+
+The demo surface now deploys to Vercel's Python runtime (`api/index.py`, `vercel.json`). `api/index.py`
+re-exports `agent.demo_server.DemoHandler` and defines nothing of its own, so the policy layer, the
+token table, the three tools and the `dataset: fixture` marking are bit-for-bit the ones described
+above — a second host, not a second implementation. `fly.toml` and `Dockerfile.demo` stay committed
+and `scripts/deploy_fly.sh` still works for anyone holding a Fly token; Fly is now the second path
+rather than the only one. The concurrency numbers above are Fly's and do not describe Vercel, which
+scales per-invocation.
+
 **Consequences** Two entry points (`:8787` for the local scoped-token server; `:8080` for the demo)
 with different data sources but shared policy. A change to `agent.refuse` affects both. The demo
 token expiry (2026-08-31) is hard-coded in `demo_data.py`; rotating it requires a code change and
