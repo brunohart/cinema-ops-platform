@@ -537,6 +537,17 @@ host, not a second implementation. `fly.toml` and `Dockerfile.demo` stay committ
 rather than the only one. The concurrency numbers above are Fly's and do not describe Vercel, which
 scales per-invocation.
 
+**A third correction, same shape as the first two.** The surface shipped with `/` returning
+`{"error":"not_found"}`. Every check was green — DNS resolved, `/healthz` was 200, the deploy script
+exited 0 — and the first person to click the link saw a JSON error and concluded the demo was down.
+The checks proved the host was *reachable* and never proved a visitor *arrives* anywhere, which is
+the same gap as publishing an address before anything answered on it, one level in. `/` now serves
+an index: HTML to browsers, the identical payload as JSON to everything else, so it documents the
+surface for people without becoming a second API for clients. Unknown paths still 404 — the root is
+not a catch-all. Section 16 of `prove_public_demo.sh` holds the line that matters: it reads the
+token off the index and authenticates with it, because a landing page advertising a token the server
+rejects would be worse than no landing page at all.
+
 The empty subclass is not a stylistic choice and cannot be shortened to `handler = DemoHandler`.
 Vercel decides whether a file under `/api` is a function by reading it for a top-level
 `app`/`application`/`handler` **definition**; an alias assignment is not one. With the alias the

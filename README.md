@@ -333,7 +333,7 @@ pytest -q                       # the whole suite
 | the CI workflow runs ruff, mypy, unit, integration and `dbt build`, and fails on a dbt test failure and not only a run error | `./scripts/prove_ci.sh` | [recorded](docs/2026-08-01-vde-50-github-actions-ci.md) |
 | no credential ever entered history; `.env.example` is blank-valued and complete | `./scripts/prove_no_secrets.sh` | [recorded](docs/2026-08-01-vde-51-secrets-out.md) — unaccounted `0` |
 | three least-privilege roles; api physically cannot write gold | `./scripts/prove_least_privilege_roles.sh` | [recorded](docs/2026-08-01-vde-52-least-privilege-roles.md) |
-| public demo surface — scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 14 sections (section 14 skipped when `PUBLIC_BASE_URL` not set) |
+| public demo surface — `/` is an index, scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no DB driver in the image | `PYTHONPATH=src ./scripts/prove_public_demo.sh` | [recorded](docs/2026-08-01-vde-54-public-demo-deploy.md) — 16 sections (section 14 skipped when `PUBLIC_BASE_URL` not set; the recorded run predates sections 15–16, added by VDE-62) |
 | case study — six section anchors, word band, operator-language test, staleness guard against what has actually shipped | `./scripts/prove_case_study.sh` | [recorded](docs/2026-08-02-vde-55-case-study.md) — `PASS=10` |
 | section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
 | spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
@@ -755,6 +755,11 @@ curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
 curl -s -H "Authorization: Bearer cinema-ops-demo-2026-08-01" \
   http://127.0.0.1:8080/tools | python3 -m json.tool
 ```
+
+**Open https://cinema-ops-platform-demo.vercel.app in a browser** and the index lists every route,
+the demo token, and the curls below. The same URL returns JSON to anything that is not a browser
+(`curl -H 'Accept: application/json'`), so the page is documentation for people without becoming a
+second API for clients.
 
 **The same curls, against the deployed surface** — no bearer token of your own required, the demo
 token below is public by design:

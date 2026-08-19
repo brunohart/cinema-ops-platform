@@ -507,6 +507,57 @@ print("ok — api/index.py subclasses the shared handler and overrides nothing; 
 PY
 echo "ok [vercel_entry_reexports_shared_handler]"
 
+# ── Section 16: / is an index, and the token it advertises works ──────────────
+# VDE-62 shipped with / returning 404. The host was up, /healthz was 200 and the
+# deploy script exited 0 — and the first person to click the link got
+# {"error":"not_found"} and read it as a dead site. "Reachable" was proven;
+# "arrives somewhere" was not, so it is proven here.
+echo "=== section 16: / serves an index (JSON and HTML), unknown paths still 404 ==="
+
+ROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/")"
+if [[ "$ROOT_CODE" != "200" ]]; then
+  fail "section 16: GET / returned $ROOT_CODE, expected 200"
+fi
+
+ROOT_TYPE="$(curl -s -o /dev/null -w '%{content_type}' "${BASE}/")"
+case "$ROOT_TYPE" in
+  application/json*) ;;
+  *) fail "section 16: GET / content-type was '$ROOT_TYPE', expected application/json" ;;
+esac
+
+HTML_TYPE="$(curl -s -H 'Accept: text/html' -o /dev/null -w '%{content_type}' "${BASE}/")"
+case "$HTML_TYPE" in
+  text/html*) ;;
+  *) fail "section 16: GET / with Accept: text/html gave '$HTML_TYPE', expected text/html" ;;
+esac
+echo "ok — / is 200 JSON for clients, 200 HTML for browsers"
+
+# An unknown path is still unknown. The root is not a catch-all.
+NOPE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/definitely-not-a-route")"
+if [[ "$NOPE" != "404" ]]; then
+  fail "section 16: unknown path returned $NOPE, expected 404"
+fi
+echo "ok — unknown paths still 404"
+
+# The guard that matters: a landing page advertising a token the server rejects
+# is worse than no landing page. Take the token off the index and use it.
+ADVERTISED="$(curl -s "${BASE}/" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['demo_token'])")"
+if [[ -z "$ADVERTISED" ]]; then
+  fail "section 16: index published no demo_token"
+fi
+ADV_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer ${ADVERTISED}" "${BASE}/tools/list_sessions")"
+if [[ "$ADV_CODE" != "200" ]]; then
+  fail "section 16: token advertised on / ('$ADVERTISED') returned $ADV_CODE, expected 200"
+fi
+
+# And the HTML a person actually reads carries that same token.
+if ! curl -s -H 'Accept: text/html' "${BASE}/" | grep -q -- "$ADVERTISED"; then
+  fail "section 16: HTML index does not show the token '$ADVERTISED'"
+fi
+echo "ok — the token printed on / authenticates against /tools/list_sessions"
+echo "ok [root_index_serves_and_advertises_a_working_token]"
+
 echo
-echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image, and both hosts share one handler (15 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
+echo "PROOF OK — public demo surface: / is an index, scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image, and both hosts share one handler (16 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
 exit 0

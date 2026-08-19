@@ -128,6 +128,14 @@ class AgentToken:
 _DEMO_TOKEN_DIGEST = "b940c6ef3f95b8abab4ea7e6a358146c3b3faec378d26834360620d9d0069fae"
 _EXPIRED_TOKEN_DIGEST = "492b965732079742ca605f1e2f0e2e79d4612b310e8f410a29e0bf6f035b1175"
 
+# The public demo token, in plaintext. Safe to publish and published on purpose
+# (ADR-015): it is scoped to two sites and three tools over fixture rows, so
+# safety here is scope, not secrecy. Named as a constant because the index page
+# at / prints it, and a landing page that told a visitor the wrong token would
+# be worse than no landing page. The assertion below is the guard: it fails
+# import if this string stops hashing to the digest the table is keyed by.
+PUBLIC_DEMO_TOKEN = "cinema-ops-demo-2026-08-01"
+
 DEMO_TOKENS: dict[str, AgentToken] = {
     _DEMO_TOKEN_DIGEST: AgentToken(
         label="cinema-ops-demo-2026-08-01",
@@ -149,6 +157,14 @@ DEMO_TOKENS: dict[str, AgentToken] = {
 
 def _hash(plaintext: str) -> str:
     return hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
+
+
+# Rotating the token means changing both lines above; this fails loudly at
+# import if only one of them moved.
+assert _hash(PUBLIC_DEMO_TOKEN) == _DEMO_TOKEN_DIGEST, (
+    "PUBLIC_DEMO_TOKEN does not hash to _DEMO_TOKEN_DIGEST — the index page "
+    "would advertise a token the server rejects"
+)
 
 
 def resolve_demo_token(
