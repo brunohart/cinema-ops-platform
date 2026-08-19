@@ -49,3 +49,10 @@ evals/output/
 evals/results.json
 promptfoo-*.json
 
+# Added by `vercel link` (VDE-62). The CLI also appended `.env*`, which was
+# removed: it sits below the `!.env.example` negation on line 26 and would have
+# silently re-ignored the one env file this repository does commit.
+.vercel
+
+# `vercel build` vendors a 54 MB uv binary here.
+_uv/

@@ -422,26 +422,36 @@ if not imports_handler:
     print("FAIL: api/index.py does not import DemoHandler from agent.demo_server")
     sys.exit(1)
 
-# ...bind it to the name Vercel invokes...
-binds_handler = any(
-    isinstance(node, ast.Assign)
-    and any(getattr(t, "id", None) == "handler" for t in node.targets)
-    and getattr(node.value, "id", None) == "DemoHandler"
-    for node in ast.walk(tree)
-)
-if not binds_handler:
-    print("FAIL: api/index.py does not bind `handler = DemoHandler`")
-    sys.exit(1)
-
-# ...and define no request handling of its own. A class here is a subclass
-# waiting to override a refusal; a do_* function is one outright.
+# ...and expose it as `class handler(DemoHandler)`. It has to be a class
+# statement, not `handler = DemoHandler`: Vercel decides whether a file under
+# /api is a function by reading it for a top-level app/application/handler
+# *definition*, and an alias is not one. With the alias, @vercel/python never
+# ran, the repository was served by @vercel/static, and api/index.py was
+# downloaded as text — a deploy that reports success and serves nothing.
 defined = [
-    node.name
+    node
     for node in tree.body
     if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
 ]
-if defined:
-    print(f"FAIL: api/index.py defines {defined} — the two hosts must share one handler")
+if len(defined) != 1 or not isinstance(defined[0], ast.ClassDef):
+    print(f"FAIL: api/index.py must define exactly one class; found {[n.name for n in defined]}")
+    sys.exit(1)
+
+cls = defined[0]
+if cls.name != "handler":
+    print(f"FAIL: api/index.py defines class {cls.name!r}; Vercel invokes 'handler'")
+    sys.exit(1)
+if [getattr(b, "id", None) for b in cls.bases] != ["DemoHandler"]:
+    print(f"FAIL: class handler must inherit DemoHandler alone; got {[ast.dump(b) for b in cls.bases]}")
+    sys.exit(1)
+
+# The subclass exists only because the detector demands a definition. The
+# moment it grows a body it becomes a second implementation, and the live URL
+# is exactly the file someone will reach for to patch a refusal "just here".
+body = [n for n in cls.body if not isinstance(n, ast.Pass)]
+body = [n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+if body:
+    print(f"FAIL: class handler overrides {[type(n).__name__ for n in body]} — it must override nothing")
     sys.exit(1)
 
 # And across the demo's real import graph, do_GET is defined exactly once.
@@ -481,14 +491,19 @@ if not any(
     print("FAIL: vercel.json must rewrite /(.*) to /api/index")
     sys.exit(1)
 
-# Without includeFiles, the function bundle ships api/index.py with no src/agent
-# beside it and every request is a cold ImportError.
-include = (cfg.get("functions") or {}).get("api/index.py", {}).get("includeFiles")
-if include != "src/agent/**":
-    print(f"FAIL: vercel.json functions['api/index.py'].includeFiles={include!r}, expected 'src/agent/**'")
+# Vercel's Python builder bundles the whole project by default, so the job here
+# is subtraction, not addition. .env* must be in it: `vercel link` writes an
+# OIDC token to .env.local, and without this the token is copied into the
+# function bundle on every deploy.
+exclude = (cfg.get("functions") or {}).get("api/index.py", {}).get("excludeFiles")
+if not exclude:
+    print("FAIL: vercel.json sets no excludeFiles for api/index.py")
+    sys.exit(1)
+if ".env*" not in exclude:
+    print(f"FAIL: excludeFiles must exclude .env* (vercel link writes a token to .env.local); got {exclude!r}")
     sys.exit(1)
 
-print("ok — api/index.py re-exports the shared handler; vercel.json routes and bundles it")
+print("ok — api/index.py subclasses the shared handler and overrides nothing; vercel.json routes it")
 PY
 echo "ok [vercel_entry_reexports_shared_handler]"
 

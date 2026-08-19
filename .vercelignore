@@ -1,11 +1,52 @@
 # The Vercel deploy carries the public demo surface only (VDE-62): api/index.py
-# plus the stdlib-only modules it imports. Everything else in this repository is
-# the platform — Postgres, dbt, Dagster, the MCP server — and has no business in
-# a function bundle that is deliberately dependency-free (ADR-015).
-*
-!api
-!api/**
-!src
-!src/agent
-!src/agent/*.py
-!vercel.json
+# plus the stdlib-only modules it imports. Everything else here is the platform
+# — Postgres, dbt, Dagster, the MCP server — and has no business in a function
+# bundle that is deliberately dependency-free (ADR-015).
+#
+# Written as a denylist. The first draft was an allowlist (`*` then `!api/**`),
+# which excluded api/index.py itself and failed the build with "the pattern
+# api/index.py defined in functions doesn't match any Serverless Functions".
+
+.venv
+_uv
+node_modules
+dist
+var
+docs
+tests
+evals
+dbt
+sql
+transform
+mcp
+agent-api
+demo
+landing
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+.github
+.cursor
+.claude
+
+# The demo surface installs nothing (ADR-015). Vercel's Python builder reads
+# whichever dependency file it finds, so leaving these up meant it resolved the
+# whole platform lockfile — dagster, dbt, psycopg — and reported "Bundle size
+# (278.47 MB) exceeds the standard size; optimizing dependencies" for a server
+# that imports only the standard library. requirements.txt (empty) is what the
+# demo declares instead. .python-version stays: it pins 3.12, and demo_data.py
+# needs datetime.UTC, which is 3.11+.
+pyproject.toml
+uv.lock
+
+# src/ is the platform too; only src/agent (the demo's import graph) goes up.
+src/extractors
+src/models
+src/orchestration
+src/stores
+src/transforms
+src/validation
+src/cli.py
+src/prove_kill_mid_stream.py
+src/prove_structlog.py

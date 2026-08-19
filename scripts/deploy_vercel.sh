@@ -39,18 +39,51 @@ elif ! "${VERCEL[@]}" whoami >/dev/null 2>&1; then
 fi
 
 # ── Deploy ────────────────────────────────────────────────────────────────────
+# Two things this got wrong on the way to working, both recorded because both
+# produced a confident-looking failure rather than an obvious one:
+#
+#  1. stdout is JSON when the CLI is not attached to a terminal, so the first
+#     version's `tail -1` health-checked a literal "}" for a minute.
+#  2. The per-deployment hostname sits behind Vercel's deployment protection and
+#     answers 302 to an anonymous request. The stable project alias is the
+#     public address — it is what goes in the README, so it is what has to be
+#     proven here. Checking the deployment URL would have passed a demo that
+#     the public cannot reach, which is this issue's whole failure mode.
 echo "== deploying the public demo surface to Vercel =="
-DEPLOY_URL="$(
-  "${VERCEL[@]}" deploy --prod --yes "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" \
-    | tail -1 | tr -d '[:space:]'
+RAW="$("${VERCEL[@]}" deploy --prod --yes "${AUTH_ARGS[@]+"${AUTH_ARGS[@]}"}" 2>&1)"
+
+PROJECT_NAME="$(
+  python3 -c "import json;print(json.load(open('.vercel/project.json'))['projectName'])" \
+    2>/dev/null || true
 )"
 
-if [[ -z "$DEPLOY_URL" ]]; then
-  echo "ERROR: vercel deploy printed no URL." >&2
+BASE="$(printf '%s' "$RAW" | PROJECT_NAME="$PROJECT_NAME" python3 -c '
+import os, re, sys
+
+raw = sys.stdin.read()
+urls = re.findall(r"https://[a-zA-Z0-9._-]+\.vercel\.app", raw)
+
+# Prefer the stable project alias.
+name = os.environ.get("PROJECT_NAME") or ""
+if name:
+    alias = f"https://{name}.vercel.app"
+    if alias in urls:
+        print(alias)
+        sys.exit(0)
+
+# Otherwise the shortest hostname seen, which is the alias rather than one of
+# the per-deployment names carrying a build hash and the team slug.
+print(min(urls, key=len) if urls else "")
+')"
+
+if [[ -z "$BASE" ]]; then
+  echo "ERROR: could not read a deployment URL out of vercel deploy output." >&2
+  echo "--- raw output ---" >&2
+  printf '%s\n' "$RAW" >&2
   exit 1
 fi
 
-BASE="$DEPLOY_URL"
+printf '%s\n' "$RAW"
 echo "== deployed to ${BASE} =="
 
 # ── Health check ──────────────────────────────────────────────────────────────

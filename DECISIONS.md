@@ -528,13 +528,25 @@ that hostname was NXDOMAIN from the day it was written. The ADR committed to a h
 paid for, which is the same error as a watermark written before the write succeeds: the record
 claimed a state that the world had not reached.
 
-The demo surface now deploys to Vercel's Python runtime (`api/index.py`, `vercel.json`). `api/index.py`
-re-exports `agent.demo_server.DemoHandler` and defines nothing of its own, so the policy layer, the
-token table, the three tools and the `dataset: fixture` marking are bit-for-bit the ones described
-above — a second host, not a second implementation. `fly.toml` and `Dockerfile.demo` stay committed
-and `scripts/deploy_fly.sh` still works for anyone holding a Fly token; Fly is now the second path
+The demo surface now deploys to Vercel's Python runtime (`api/index.py`, `vercel.json`) and is live
+at `https://cinema-ops-platform-demo.vercel.app`. `api/index.py` subclasses
+`agent.demo_server.DemoHandler` and overrides nothing, so the policy layer, the token table, the
+three tools and the `dataset: fixture` marking are bit-for-bit the ones described above — a second
+host, not a second implementation. `fly.toml` and `Dockerfile.demo` stay committed and
+`scripts/deploy_fly.sh` still works for anyone holding a Fly token; Fly is now the second path
 rather than the only one. The concurrency numbers above are Fly's and do not describe Vercel, which
 scales per-invocation.
+
+The empty subclass is not a stylistic choice and cannot be shortened to `handler = DemoHandler`.
+Vercel decides whether a file under `/api` is a function by reading it for a top-level
+`app`/`application`/`handler` **definition**; an alias assignment is not one. With the alias the
+build reported success, `@vercel/python` never ran, `@vercel/static` served the repository, and
+`api/index.py` was downloadable as source while every documented route 404'd — a deployment that
+looks deployed. Two guards came out of that: section 15 of `prove_public_demo.sh` asserts the class
+exists and that its body stays empty, and `scripts/deploy_vercel.sh` health-checks the **stable
+project alias** rather than the per-deployment hostname, which sits behind deployment protection and
+answers 302 to the public. Checking the wrong one would have passed a demo nobody can reach, which
+is precisely the failure this amendment exists to close.
 
 **Consequences** Two entry points (`:8787` for the local scoped-token server; `:8080` for the demo)
 with different data sources but shared policy. A change to `agent.refuse` affects both. The demo

@@ -2,7 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
     "api/index.py": {
-      "includeFiles": "src/agent/**"
+      "excludeFiles": "{.env*,.venv/**,node_modules/**,**/node_modules/**,dbt/**,docs/**,tests/**,evals/**,mcp/**,agent-api/**,sql/**,var/**,dist/**,demo/**,landing/**,transform/**,.github/**,.cursor/**,.claude/**,.*_cache/**,src/orchestration/**}"
     }
   },
   "rewrites": [
