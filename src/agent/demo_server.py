@@ -20,12 +20,13 @@ import json
 import os
 import re
 from datetime import date
+from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from agent.catalog import IMPLEMENTED_TOOLS, TOOL_COLUMNS, TOOL_DESCRIPTIONS
-from agent.demo_data import resolve_demo_token, rows_for
+from agent.demo_data import PUBLIC_DEMO_TOKEN, resolve_demo_token, rows_for
 from agent.refuse import AuthorizedCall, Refusal, authorize
 
 DEFAULT_HOST = "0.0.0.0"
@@ -70,6 +71,112 @@ def _http_status_for(refusal: Refusal) -> int:
     return 403
 
 
+REPO_URL = "https://github.com/brunohart/cinema-ops-platform"
+
+
+def _index_payload() -> dict[str, Any]:
+    """What `/` says. One definition, rendered as JSON or as HTML."""
+    return {
+        "service": "cinema-ops-public-demo",
+        "dataset": "fixture",
+        "description": (
+            "Bearer-scoped, read-only tool surface over fixture cinema data. "
+            "The refusal policy is the same code the local Postgres-backed "
+            "server runs; only the data source differs."
+        ),
+        "demo_token": PUBLIC_DEMO_TOKEN,
+        "token_note": (
+            "Public on purpose: scoped to sites 1-2 and three tools over "
+            "fixture rows. Safety here is scope, not secrecy."
+        ),
+        "endpoints": [
+            {"path": "/healthz", "auth": False, "description": "Liveness and tool count."},
+            {"path": "/tools", "auth": True, "description": "Tool manifest for your token."},
+            *(
+                {
+                    "path": f"/tools/{name}",
+                    "auth": True,
+                    "description": TOOL_DESCRIPTIONS[name].split(". ")[0] + ".",
+                }
+                for name in IMPLEMENTED_TOOLS
+            ),
+        ],
+        "try_it": [
+            f"curl -H 'Authorization: Bearer {PUBLIC_DEMO_TOKEN}' <base>/tools/list_sessions",
+            "curl <base>/tools/list_sessions                      # 401 missing_bearer_token",
+            f"curl -H 'Authorization: Bearer {PUBLIC_DEMO_TOKEN}' "
+            "'<base>/tools/list_sessions?siteIds=3'   # 403 site_scope",
+        ],
+        "source": REPO_URL,
+    }
+
+
+def _index_html(payload: dict[str, Any]) -> str:
+    """Minimal self-contained page. Stdlib only — no template engine, no CDN."""
+    rows = "\n".join(
+        "<tr><td><code>{}</code></td><td>{}</td><td>{}</td></tr>".format(
+            escape(str(e["path"])),
+            "bearer" if e["auth"] else "open",
+            escape(str(e["description"])),
+        )
+        for e in payload["endpoints"]
+    )
+    curls = escape("\n".join(payload["try_it"]))
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cinema-ops public demo</title>
+<style>
+ :root {{ color-scheme: light dark; --fg:#1a1a1a; --bg:#fbfaf8; --mut:#6b7280;
+          --line:#e5e2dd; --accent:#C08B4F; --code:#f3f1ed; }}
+ @media (prefers-color-scheme: dark) {{
+   :root {{ --fg:#e8e6e3; --bg:#16161a; --mut:#9aa0a6; --line:#2c2c33; --code:#1f1f25; }} }}
+ * {{ box-sizing:border-box; }}
+ body {{ margin:0; padding:2.5rem 1.25rem; background:var(--bg); color:var(--fg);
+        font:16px/1.6 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif; }}
+ main {{ max-width:52rem; margin:0 auto; }}
+ h1 {{ font-size:1.5rem; margin:0 0 .25rem; letter-spacing:-.01em; }}
+ .badge {{ display:inline-block; font-size:.75rem; font-weight:600; letter-spacing:.04em;
+           text-transform:uppercase; color:var(--accent); border:1px solid var(--accent);
+           border-radius:999px; padding:.1rem .55rem; vertical-align:middle; }}
+ p.lede {{ color:var(--mut); margin:.5rem 0 2rem; }}
+ h2 {{ font-size:.8rem; text-transform:uppercase; letter-spacing:.08em; color:var(--mut);
+       margin:2rem 0 .6rem; }}
+ table {{ width:100%; border-collapse:collapse; font-size:.9rem; }}
+ td,th {{ text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line);
+          vertical-align:top; }}
+ td:nth-child(2) {{ color:var(--mut); white-space:nowrap; width:1%; }}
+ code {{ background:var(--code); padding:.1rem .35rem; border-radius:4px;
+         font:.85em ui-monospace,SFMono-Regular,Menlo,monospace; }}
+ pre {{ background:var(--code); padding:.9rem 1rem; border-radius:8px; overflow-x:auto;
+        font:.82rem/1.7 ui-monospace,SFMono-Regular,Menlo,monospace; }}
+ a {{ color:inherit; }}
+ footer {{ margin-top:2.5rem; padding-top:1rem; border-top:1px solid var(--line);
+           color:var(--mut); font-size:.85rem; }}
+</style></head><body><main>
+<h1>cinema-ops public demo <span class="badge">fixture data</span></h1>
+<p class="lede">{escape(str(payload["description"]))}</p>
+
+<h2>Endpoints</h2>
+<table><tr><th>Path</th><th>Auth</th><th>What it does</th></tr>
+{rows}
+</table>
+
+<h2>Demo token</h2>
+<p><code>{escape(str(payload["demo_token"]))}</code><br>
+<span style="color:var(--mut);font-size:.9rem">{escape(str(payload["token_note"]))}</span></p>
+
+<h2>Try it</h2>
+<pre>{curls}</pre>
+
+<footer>Every response carries <code>X-Cinema-Ops-Dataset: fixture</code> — this
+surface never touches live data. Source and the reasoning behind it:
+<a href="{escape(REPO_URL)}">{escape(REPO_URL)}</a>. This page is also available
+as JSON: <code>curl -H 'Accept: application/json' &lt;base&gt;/</code></footer>
+</main></body></html>
+"""
+
+
 class DemoHandler(BaseHTTPRequestHandler):
     """Minimal JSON demo API. Stdlib only."""
 
@@ -88,9 +195,36 @@ class DemoHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _html(self, status: int, markup: str) -> None:
+        data = markup.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header(*_DATASET_HEADER)
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _wants_html(self) -> bool:
+        """True for a browser, false for curl and every agent client."""
+        return "text/html" in (self.headers.get("Accept") or "")
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/") or "/"
+
+        # ── / — index ────────────────────────────────────────────────────────
+        # VDE-62. This used to 404. The address resolved, the health check
+        # passed, and a person who clicked the link read {"error":"not_found"}
+        # and reasonably concluded the demo was down — a surface can be up and
+        # still be dead to the only visitor who does not already know the
+        # routes. Unknown paths below still 404; the root is not unknown.
+        if path == "/":
+            payload = _index_payload()
+            if self._wants_html():
+                self._html(200, _index_html(payload))
+            else:
+                self._json(200, payload)
+            return
 
         # ── /healthz ─────────────────────────────────────────────────────────
         if path == "/healthz":

@@ -2,8 +2,8 @@
 
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
-**Last revised:** 2026-08-03
-**Revision count:** 11
+**Last revised:** 2026-08-20
+**Revision count:** 13
 
 ---
 
@@ -84,7 +84,7 @@ Failure modes I can name, have decided not to handle in this build, and can defe
 | ticketing events | out-of-order arrival across partitions | event ordering is not load-bearing for the facts modelled here | event-time windowing with a lateness allowance |
 | landing files | partial file read — file consumed while still being written | _(unfilled — see section 8)_ | atomic rename / marker file convention with the producer |
 | grants | a gold table created by `transformer` carries no `api` grant until `008_api_role.sql` is re-run | a default privilege would grant the next PII-bearing gold table to `api` by default — failing closed is the correct direction (ADR-016) | an event trigger granting `SELECT` on `CREATE TABLE` with a PII-column denylist |
-| public demo (Fly.io) | fixture data diverges from production schema | the demo is illustrative only; it carries `"dataset":"fixture"` on every response and `X-Cinema-Ops-Dataset: fixture` header | retire the demo or wire it to a read replica once production schema is stable |
+| public demo (Vercel; Fly retained as second path) | fixture data diverges from production schema | the demo is illustrative only; it carries `"dataset":"fixture"` on every response and `X-Cinema-Ops-Dataset: fixture` header | retire the demo or wire it to a read replica once production schema is stable |
 
 ### 2c. The three clocks — why `cinema_ops` re-reads five minutes
 
@@ -490,6 +490,33 @@ Format:
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
 
+### 2026-08-20 · [header] · the staleness rule went unhonoured a second time — by the commit that edits this file
+
+**Predicted:**   The 2026-08-03 correction below closed this exact gap: every revision bumps
+`Last revised` and `Revision count`, and section 9's staleness rule blocks new work when the header
+falls more than 48 hours behind the newest code commit.
+
+**Observed:**    Commit `bb52517` (2026-08-06) added four section 7 corrections to this file and left
+the header reading `2026-08-03 · 11`. It then sat that way for two weeks while `main` moved — the
+rule section 9 states was violated by the document that states it, for the second time, after a
+correction entry naming the first.
+
+**Why the gap:**  Same failure as 2026-08-03, unchanged by having been named: the bump is a manual
+step at the end of a list, and nothing evaluates the staleness rule except the ritual the rule is
+part of. A rule whose only enforcement is the discipline it exists to reinforce fails exactly when
+that discipline does.
+
+**Changed:**      Header corrected to `2026-08-20` / `13` — 11, plus the unrecorded 2026-08-06
+revision, plus this one. Also in this revision: §2b and §10 catch up to VDE-62 (the live demo host
+is Vercel; Fly is the retained second path — the ADR-015 amendment in DECISIONS.md has the full
+account), and §9's opening and closing paragraphs are rewritten in plain language — the register
+correction is a revision like any other, so it is named here rather than slipped in.
+
+**Cost:**         Seventeen days of a header claiming the document was more current than it was, in
+the file that argues the header is what a reader trusts. Caught by review, not by the rule.
+
+---
+
 ### 2026-08-06 · [agent tool surface] · a bounded tool set that could not return a result
 
 **Predicted:**   Section 6c and ADR-009 describe `agent.tools.invoke_tool` as the fixed, bounded
@@ -830,9 +857,10 @@ go and find a question rather than to celebrate.
 
 ## 9. The revision ritual
 
-This section is the self-reinforcing human-gated looping mechanism. For every piece of new data I
-personally uncover in building the systems and processes to deployment it is paramount to integrate a
-forcing-function into my workflow so that the architecture can evolve totally.
+This section is the forcing function. What the build teaches has to land back in this document on a
+schedule, or the file rots into a preamble that pretends it was always right. The mechanisms below
+are how that happens: a short daily pass with a fixed script, conditions with teeth, and a rule that
+the corrections stay visible.
 
 ### Daily — five minutes, end of day, non-negotiable
 
@@ -872,8 +900,8 @@ I don't clean this file up. The corrections stay, the wrong predictions stay, an
 tidied to look like it was right the first time. A document that visibly changed under contact with a
 real system is a stronger artefact than one that appears to have been correct on day zero.
 
-The commit history of this single file is part of doing the work of evolving a core understanding of
-how software architecture can be both a structural and organic process.
+The commit history of this single file is the record of that contact — what was believed, when it
+broke, and what replaced it.
 
 ---
 
@@ -908,3 +936,4 @@ behind the significant ones — and the condition under which I would reverse ea
 | 2026-08-02 | Loom demo uses a separate `cinema_redteam` database for agent beats; compose stack is unchanged | run agent beats against `cinema_ops` | dbt `dim_film` has no synopsis, compose mounts the 003 schema (token_label NOT NULL) while the tool layer inserts the 002 shape, and `:8787` writes no audit row — a second DB avoids all three without touching compose or dbt (VDE-57) |
 | 2026-08-03 | omissions list moved below the fold; the checks that police it now scan the whole README | raise the 1300-word above-fold budget to fit it | the budget is the four-minute-read promise (VDE-53) and relaxing a threshold to make a check pass is the habit §5c exists to forbid; the claims stay, they moved. The load-bearing half is the second: both freshness guards were scoped to the section the list used to live in, so relocating it would have silently disabled the check that catches a "not built" claim outliving the build — a check that stops checking when its subject moves address is worse than none, because the green stays |
 | 2026-08-02 | TypeScript MCP `logAccess` written inside `runTool` via the same `Queryable`; fail-closed on log failure; `resolveServerToken` selects DB vs env path at startup | separate log handle or log-and-continue | same interface, no extra surface; fail-closed is the only option consistent with the audit guarantee; production and fixture paths never mix (ADR-017 / VDE-46) |
+| 2026-08-19 | demo host moved to Vercel's Python runtime; `fly.toml` and `deploy_fly.sh` retained as the second path | keep waiting for a Fly token | the printed fly.dev address was NXDOMAIN from the day it was written — a URL published on the strength of a config file is a watermark written before the write; the Vercel entry point subclasses `DemoHandler` and overrides nothing, so the two hosts cannot disagree (VDE-62, ADR-015 amendment) |

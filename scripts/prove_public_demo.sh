@@ -388,6 +388,176 @@ else
   echo "(section 14 skipped — PUBLIC_BASE_URL not set)"
 fi
 
+# ── Section 15: Vercel entry point re-exports, and does not reimplement ───────
+# VDE-62. The demo now has two hosts. The failure this guards is not a broken
+# deploy — it is a working one that drifts: someone patches a refusal into
+# api/index.py because that is the file the live URL runs, and the Fly image and
+# the local server keep the old behaviour. Grepping for "it looks the same" would
+# not catch that, so the check is structural: api/index.py may bind the handler
+# and nothing more. Every route, status code and refusal has one definition.
+echo "=== section 15: Vercel entry point re-exports DemoHandler ==="
+"$PYTHON" - <<'PY'
+import ast
+import json
+import sys
+from pathlib import Path
+
+root = Path(".")
+
+entry_path = root / "api" / "index.py"
+if not entry_path.exists():
+    print("FAIL: api/index.py is missing (VDE-62 Vercel entry point)")
+    sys.exit(1)
+
+tree = ast.parse(entry_path.read_text())
+
+# It must import the shared handler...
+imports_handler = any(
+    isinstance(node, ast.ImportFrom)
+    and node.module == "agent.demo_server"
+    and any(alias.name == "DemoHandler" for alias in node.names)
+    for node in ast.walk(tree)
+)
+if not imports_handler:
+    print("FAIL: api/index.py does not import DemoHandler from agent.demo_server")
+    sys.exit(1)
+
+# ...and expose it as `class handler(DemoHandler)`. It has to be a class
+# statement, not `handler = DemoHandler`: Vercel decides whether a file under
+# /api is a function by reading it for a top-level app/application/handler
+# *definition*, and an alias is not one. With the alias, @vercel/python never
+# ran, the repository was served by @vercel/static, and api/index.py was
+# downloaded as text — a deploy that reports success and serves nothing.
+defined = [
+    node
+    for node in tree.body
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+]
+if len(defined) != 1 or not isinstance(defined[0], ast.ClassDef):
+    print(f"FAIL: api/index.py must define exactly one class; found {[n.name for n in defined]}")
+    sys.exit(1)
+
+cls = defined[0]
+if cls.name != "handler":
+    print(f"FAIL: api/index.py defines class {cls.name!r}; Vercel invokes 'handler'")
+    sys.exit(1)
+if [getattr(b, "id", None) for b in cls.bases] != ["DemoHandler"]:
+    print(f"FAIL: class handler must inherit DemoHandler alone; got {[ast.dump(b) for b in cls.bases]}")
+    sys.exit(1)
+
+# The subclass exists only because the detector demands a definition. The
+# moment it grows a body it becomes a second implementation, and the live URL
+# is exactly the file someone will reach for to patch a refusal "just here".
+body = [n for n in cls.body if not isinstance(n, ast.Pass)]
+body = [n for n in body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant))]
+if body:
+    print(f"FAIL: class handler overrides {[type(n).__name__ for n in body]} — it must override nothing")
+    sys.exit(1)
+
+# And across the demo's real import graph, do_GET is defined exactly once.
+# Scoped to what the entry point actually imports, not to src/agent/*.py —
+# agent.server defines its own do_GET for the scoped-token server on :8787 and
+# is no part of this surface. An earlier draft of this check swept the whole
+# package and failed on that file, which is the check being wrong, not the code.
+sys.path.insert(0, str((root / "src").resolve()))
+import importlib.util
+
+spec = importlib.util.spec_from_file_location("vercel_entry", entry_path)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+graph = sorted(
+    Path(mod.__file__).as_posix()
+    for name, mod in sys.modules.items()
+    if name.startswith("agent") and getattr(mod, "__file__", None)
+)
+owners = [p for p in graph if "def do_GET" in Path(p).read_text()]
+if len(owners) != 1 or not owners[0].endswith("src/agent/demo_server.py"):
+    print(f"FAIL: do_GET defined in {owners}; expected only src/agent/demo_server.py")
+    sys.exit(1)
+
+cfg_path = root / "vercel.json"
+if not cfg_path.exists():
+    print("FAIL: vercel.json is missing")
+    sys.exit(1)
+cfg = json.loads(cfg_path.read_text())
+
+# Without the catch-all rewrite, /healthz and /tools/* are 404s served by the
+# filesystem and only /api/index reaches the handler.
+rewrites = cfg.get("rewrites") or []
+if not any(
+    r.get("source") == "/(.*)" and r.get("destination") == "/api/index" for r in rewrites
+):
+    print("FAIL: vercel.json must rewrite /(.*) to /api/index")
+    sys.exit(1)
+
+# Vercel's Python builder bundles the whole project by default, so the job here
+# is subtraction, not addition. .env* must be in it: `vercel link` writes an
+# OIDC token to .env.local, and without this the token is copied into the
+# function bundle on every deploy.
+exclude = (cfg.get("functions") or {}).get("api/index.py", {}).get("excludeFiles")
+if not exclude:
+    print("FAIL: vercel.json sets no excludeFiles for api/index.py")
+    sys.exit(1)
+if ".env*" not in exclude:
+    print(f"FAIL: excludeFiles must exclude .env* (vercel link writes a token to .env.local); got {exclude!r}")
+    sys.exit(1)
+
+print("ok — api/index.py subclasses the shared handler and overrides nothing; vercel.json routes it")
+PY
+echo "ok [vercel_entry_reexports_shared_handler]"
+
+# ── Section 16: / is an index, and the token it advertises works ──────────────
+# VDE-62 shipped with / returning 404. The host was up, /healthz was 200 and the
+# deploy script exited 0 — and the first person to click the link got
+# {"error":"not_found"} and read it as a dead site. "Reachable" was proven;
+# "arrives somewhere" was not, so it is proven here.
+echo "=== section 16: / serves an index (JSON and HTML), unknown paths still 404 ==="
+
+ROOT_CODE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/")"
+if [[ "$ROOT_CODE" != "200" ]]; then
+  fail "section 16: GET / returned $ROOT_CODE, expected 200"
+fi
+
+ROOT_TYPE="$(curl -s -o /dev/null -w '%{content_type}' "${BASE}/")"
+case "$ROOT_TYPE" in
+  application/json*) ;;
+  *) fail "section 16: GET / content-type was '$ROOT_TYPE', expected application/json" ;;
+esac
+
+HTML_TYPE="$(curl -s -H 'Accept: text/html' -o /dev/null -w '%{content_type}' "${BASE}/")"
+case "$HTML_TYPE" in
+  text/html*) ;;
+  *) fail "section 16: GET / with Accept: text/html gave '$HTML_TYPE', expected text/html" ;;
+esac
+echo "ok — / is 200 JSON for clients, 200 HTML for browsers"
+
+# An unknown path is still unknown. The root is not a catch-all.
+NOPE="$(curl -s -o /dev/null -w '%{http_code}' "${BASE}/definitely-not-a-route")"
+if [[ "$NOPE" != "404" ]]; then
+  fail "section 16: unknown path returned $NOPE, expected 404"
+fi
+echo "ok — unknown paths still 404"
+
+# The guard that matters: a landing page advertising a token the server rejects
+# is worse than no landing page. Take the token off the index and use it.
+ADVERTISED="$(curl -s "${BASE}/" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin)['demo_token'])")"
+if [[ -z "$ADVERTISED" ]]; then
+  fail "section 16: index published no demo_token"
+fi
+ADV_CODE="$(curl -s -o /dev/null -w '%{http_code}' \
+  -H "Authorization: Bearer ${ADVERTISED}" "${BASE}/tools/list_sessions")"
+if [[ "$ADV_CODE" != "200" ]]; then
+  fail "section 16: token advertised on / ('$ADVERTISED') returned $ADV_CODE, expected 200"
+fi
+
+# And the HTML a person actually reads carries that same token.
+if ! curl -s -H 'Accept: text/html' "${BASE}/" | grep -q -- "$ADVERTISED"; then
+  fail "section 16: HTML index does not show the token '$ADVERTISED'"
+fi
+echo "ok — the token printed on / authenticates against /tools/list_sessions"
+echo "ok [root_index_serves_and_advertises_a_working_token]"
+
 echo
-echo "PROOF OK — public demo surface: scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image (14 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
+echo "PROOF OK — public demo surface: / is an index, scoped bearer returns rows, no bearer is 401, out-of-scope site refused, no driver in the image, and both hosts share one handler (16 sections; section 14 skipped when PUBLIC_BASE_URL not set)"
 exit 0

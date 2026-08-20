@@ -1,0 +1,11 @@
+# Intentionally empty of dependencies. The public demo surface is stdlib-only
+# (ADR-015), and section 1 of scripts/prove_public_demo.sh fails if psycopg or
+# pydantic ever appear in its import graph.
+#
+# This file is not what makes Vercel treat api/index.py as a function — that is
+# the top-level `class handler` in the file itself. It is here to state "no
+# dependencies" in the one place the Python builder looks, so the build log
+# reads "Installing required dependencies from requirements.txt" and says so
+# out loud. pyproject.toml and uv.lock are withheld from the deploy by
+# .vercelignore: left visible, the builder resolved the whole platform lockfile
+# and reported a 278 MB bundle for a server that imports only the stdlib.

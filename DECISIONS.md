@@ -520,6 +520,45 @@ Concrete choices:
 - Entry point `python3 -m agent.demo_server` with `PYTHONPATH=src`. The demo modules must not import `agent.tools`, `agent.limits`, or `src.cli` — no DB driver anywhere in the import graph.
 - Fly concurrency: `type=requests soft=20 hard=40`. No app-level rate limiting; Fly handles machine scaling.
 
+**Amendment · 2026-08-19 (VDE-62) — the host changed; nothing above it did.** This ADR named Fly.io
+as the deploy target and the README printed `cinema-ops-platform-demo.fly.dev` as the address the
+public curls would reach. `scripts/deploy_fly.sh` was never run — it requires `flyctl` in `PATH` and
+`FLY_API_TOKEN` set, and neither has ever existed on the machine that built this repository — so
+that hostname was NXDOMAIN from the day it was written. The ADR committed to a host it had not
+paid for, which is the same error as a watermark written before the write succeeds: the record
+claimed a state that the world had not reached.
+
+The demo surface now deploys to Vercel's Python runtime (`api/index.py`, `vercel.json`) and is live
+at `https://cinema-ops-platform-demo.vercel.app`. `api/index.py` subclasses
+`agent.demo_server.DemoHandler` and overrides nothing, so the policy layer, the token table, the
+three tools and the `dataset: fixture` marking are bit-for-bit the ones described above — a second
+host, not a second implementation. `fly.toml` and `Dockerfile.demo` stay committed and
+`scripts/deploy_fly.sh` still works for anyone holding a Fly token; Fly is now the second path
+rather than the only one. The concurrency numbers above are Fly's and do not describe Vercel, which
+scales per-invocation.
+
+**A third correction, same shape as the first two.** The surface shipped with `/` returning
+`{"error":"not_found"}`. Every check was green — DNS resolved, `/healthz` was 200, the deploy script
+exited 0 — and the first person to click the link saw a JSON error and concluded the demo was down.
+The checks proved the host was *reachable* and never proved a visitor *arrives* anywhere, which is
+the same gap as publishing an address before anything answered on it, one level in. `/` now serves
+an index: HTML to browsers, the identical payload as JSON to everything else, so it documents the
+surface for people without becoming a second API for clients. Unknown paths still 404 — the root is
+not a catch-all. Section 16 of `prove_public_demo.sh` holds the line that matters: it reads the
+token off the index and authenticates with it, because a landing page advertising a token the server
+rejects would be worse than no landing page at all.
+
+The empty subclass is not a stylistic choice and cannot be shortened to `handler = DemoHandler`.
+Vercel decides whether a file under `/api` is a function by reading it for a top-level
+`app`/`application`/`handler` **definition**; an alias assignment is not one. With the alias the
+build reported success, `@vercel/python` never ran, `@vercel/static` served the repository, and
+`api/index.py` was downloadable as source while every documented route 404'd — a deployment that
+looks deployed. Two guards came out of that: section 15 of `prove_public_demo.sh` asserts the class
+exists and that its body stays empty, and `scripts/deploy_vercel.sh` health-checks the **stable
+project alias** rather than the per-deployment hostname, which sits behind deployment protection and
+answers 302 to the public. Checking the wrong one would have passed a demo nobody can reach, which
+is precisely the failure this amendment exists to close.
+
 **Consequences** Two entry points (`:8787` for the local scoped-token server; `:8080` for the demo)
 with different data sources but shared policy. A change to `agent.refuse` affects both. The demo
 token expiry (2026-08-31) is hard-coded in `demo_data.py`; rotating it requires a code change and
