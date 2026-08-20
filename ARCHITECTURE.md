@@ -490,6 +490,170 @@ Format:
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
 
+### 2026-08-06 · [agent tool surface] · a bounded tool set that could not return a result
+
+**Predicted:**   Section 6c and ADR-009 describe `agent.tools.invoke_tool` as the fixed, bounded
+surface an agent reaches gold through — three named tools, every call written to
+`meta.agent_access_log`, refusals included. The README shows its recorded output. VDE-48's red-team
+proof runs through it.
+
+**Observed:**    Every call through it raised. Four separate defects, each of which would have been
+caught by running the thing once against the schema the platform actually ships:
+
+1. `_log` inserted `(tool, params, outcome, refusal_reason)`. `sql/meta/003_agent_access_log.sql` —
+   the file compose mounts, and the authoritative one since VDE-43 — declares `token_label text NOT
+   NULL`. So the audit write raised `NotNullViolation` on *every* path, including the refusal paths
+   that exist to demonstrate the boundary holding.
+2. `get_session_occupancy` selected `seats_sold` and `seats_capacity` from `gold.fct_session`.
+   That table's declared grain is one scheduled session — keys and `starts_at`, no measures. The
+   columns have never existed there; occupancy lives on `fct_showtime_performance`. Every call
+   raised `UndefinedColumn`.
+3. `_parse_params` coerced `site_key` with `int()`. `dim_site.site_key` is an md5 surrogate. A real
+   key raised `ValueError`; an integer-shaped one parsed cleanly and then matched no row.
+4. `get_site_revenue` turned that miss into `{"booking_count": 0, "gross_revenue": 0}` with
+   `outcome: "ok"`, and `demo/ask.py` — the Loom demo's "ask an operational question" beat — asserted
+   only on `outcome == "ok"`. The demo's headline moment was a confident zero.
+
+**Why the gap:**  The surface has two implementations of the same idea and only one of them was ever
+exercised. The token-scoped path (`agent/server.py` → `refuse.authorize` → `tools.get_site_performance`)
+has proofs, tests and a live HTTP surface. The `invoke_tool` path had no unit test at all, and its
+proof script — `prove_synopsis_injection.sh` — provisions `sql/meta/002_agent_access_log.sql`, the
+*superseded* table shape with no `token_label`. The proof passed because it built the schema the code
+was written against rather than the schema the platform ships. A proof that provisions its own
+premises tests the premises.
+
+Defect 4 is the one worth naming, because it is section 6c's argument turned against itself. An
+exception is loud and stops the caller. An empty result carrying `ok` is the failure `agent/refuse.py`
+opens by describing — *a system that guesses when it is out of scope is worse than one that fails,
+because the guess is indistinguishable from an answer* — and it was sitting inside the tool layer the
+whole time, in the module that names it.
+
+**Changed:**      `_log` writes `token_label` (`"unscoped"`, since this surface carries no bearer) and
+`row_count`, so the log can distinguish a resolved answer from an empty one after the fact.
+`get_session_occupancy` reads `fct_showtime_performance`, joined to `dim_site` on `cinema_id` and
+deriving `date_key` from `show_date` — `agent_reader` holds no grant on `dim_date` and a tool must not
+need one it was never given. `site_key` is carried as text. Both aggregate tools return an explicit
+`found` flag; absence is now a distinct answer from zero, and `demo/ask.py` exits non-zero on it.
+`tests/agent/test_tools.py` covers all four as regressions — the module had none.
+
+**Still open:** the tool is now correct against the schema; the seed data it reads is not conformed to
+it. `fct_showtime_performance`'s fixture row carries `cinema_id = 'SYL'`, while `dim_site` — built by
+dbt from the bronze seed — holds site codes `1` and `2`. Two site vocabularies in one gold layer,
+which is the exact thing `dim_site` exists to resolve, so `get_session_occupancy` returns
+`found: false` against the shipped compose stack even with the query fixed. Not papered over with a
+hand-written fixture row: the honest statement is that the conformance the dimension promises has not
+been done for this fact. *First move:* seed the showtime fixture through the same bronze → silver →
+`dim_site` path as everything else, so its site codes conform by construction rather than by
+coincidence, and add an asset check that fails when any `fct_*` carries a `cinema_id` absent from
+`dim_site`.
+
+**Cost:**         Not paid in production, because there is none. Paid in the claim: the recorded
+access-log output in the README came from the `AgentAccessLogStore` path, not this one, so the
+document showed a working surface beside code that could not produce it.
+
+---
+
+### 2026-08-06 · [ARCHITECTURE §6d] · the minimum group size was a sentence, not a filter
+
+**Predicted:**   Section 6d states it flatly: *aggregate outputs enforce a minimum group size …
+queries returning cohorts below the threshold return nothing rather than a small number.* The README
+repeats it. `agent/catalog.py` defines `MIN_GROUP_SIZE = 5` and an `AGGREGATE_TOOLS` set to apply it
+to.
+
+**Observed:**    Three implementations of `get_site_performance` exist —
+`agent-api/src/queries.ts`, `agent/demo_data.py`, and `agent/tools.py`. The first two filter on
+`MIN_GROUP_SIZE`. The third, the only one that reads real Postgres, did not, and neither did
+`agent/site_performance.py`. `get_session_occupancy`'s docstring said *minimum-group-size floor
+applied* above a function containing no floor.
+
+**Why the gap:**  The constant landed in `catalog.py` for the fixture demo (VDE-54), which is
+stdlib-only and could not import the DB-backed path. The rule got implemented where the constant was
+defined rather than everywhere the rule applies, and the docstring was written from section 6d rather
+than from the function underneath it. A governance rule that lives in the surface a reviewer runs and
+not in the surface that touches data is a demonstration of the rule, not the rule.
+
+**Changed:**      The floor is applied in both Postgres-backed paths. Suppressed rows are *counted*
+and reported (`suppressed_rows`, `min_group_size`) rather than silently dropped — a caller that cannot
+tell filtering from absence reads the gap as "no trading", which trades one wrong answer for another.
+`get_session_occupancy` suppresses the measures while keeping the row, so a small cohort is reported
+as too small rather than as no sessions. `get_site_revenue` is deliberately *not* floored and now says
+why: revenue is a commercial measure at booking grain, not an attendance cohort (§6a).
+
+**Cost:**         Caught by reading the docstring against the function, not by any test — which is the
+finding. Nothing tested that the rule was enforced anywhere except the fixture path.
+
+---
+
+### 2026-08-06 · [`.env.example`] · every default defeated by the file that documents it
+
+**Predicted:**   The README quickstart is `cp .env.example .env` with the note *port knobs; all have
+safe defaults*. VDE-51 made `.env.example` blank-valued and complete, on purpose.
+
+**Observed:**    Blank is not absent. `os.environ.get("KEY", default)` returns `""` for a key that is
+present and empty, and every default in the agent layer was written that way. Following the documented
+quickstart and sourcing the result gave: `agent.server` dying on
+`int('')` before argparse ran; `AGENT_TOOLS_HOST=` binding `0.0.0.0` instead of loopback; and
+`dsn_from_env()` returning `""`, which `psycopg.connect` accepts and resolves from libpq's own
+environment instead of the intended DSN.
+
+**Why the gap:**  Two correct decisions that were never checked against each other. Blank-valued keys
+are right for a committed example file; `get(key, default)` is the ordinary idiom. The rest of the
+codebase happens to use `os.environ.get(...) or DEFAULT`, which is immune — so the bug survived in
+exactly the four places that did not.
+
+**Changed:**      `or`-form defaults in `agent/server.py`, `agent/demo_server.py`, `agent/db.py` and
+`agent/tools.py`. Blank now means unset everywhere.
+
+**Cost:**         Real, and borne by the reviewer rather than by me: this is the first command in the
+README, and it failed for anyone who ran it as written on a machine where the file had been sourced.
+
+---
+
+### 2026-08-06 · [proof scripts] · three ways a green exit code proved nothing
+
+**Predicted:**   *Done is a green exit code on a clean clone.* Every task ships the command that
+proves it.
+
+**Observed:**    Three of those commands could exit 0, or fail, for reasons unrelated to what they
+claim to check:
+
+- `pytest -m integration` with no dbt on `PATH` collected nothing, printed "N deselected" and exited
+  **0**. `tests/integration/conftest.py` ignores the module at collection because it raises on import
+  without dbt — correct in itself, but it turned "the integration suite could not run" into "the
+  integration suite passed".
+- `prove_dlq.sh` ran `python3 -m pip install`. The repository's own toolchain is `uv`, and a
+  uv-created venv ships no pip — so the script failed with `No module named pip` on an environment
+  built exactly the way CI builds it.
+- `prove_synopsis_injection.sh` and `demo_prepare.sh` read the *migration-owner* DSN out of
+  `DATABASE_URL`, which `.env.example` and `prove-agent-api.sh` both document as the read-only `api`
+  role. Every other script uses `$DB` for the owner. Following the documented `.env` made the script
+  try to apply DDL as `api` and fail on `permission denied for database cinema_ops`.
+  `prove_agent_limits.sh` separately hardcoded `127.0.0.1:5432` for its `statement_timeout` check
+  while honouring `$DB` everywhere else, so on a stack moved off 5432 — the case `DB_HOST_PORT` exists
+  for — it silently probed whatever else was listening there.
+
+**Why the gap:**  Each script was written and verified in one environment and never run in a second
+one. The uv/pip split and the port-collision path are precisely the differences a clean clone on
+someone else's machine introduces, which is the environment the claim is about.
+
+**Changed:**      `pytest -m integration` without dbt now warns and exits non-zero rather than
+reporting a green run that tested nothing; the unit suite is untouched. `prove_dlq.sh` installs
+through `uv` when present and only when the imports are actually missing. `$DB` is the owner DSN in
+both scripts that had it backwards, with `DATABASE_URL` kept as a fallback. `prove_agent_limits.sh`
+derives host, port and database from `$DB`.
+
+**Still open:** the proof scripts share one database and are not order-independent —
+`prove_asset_checks.sh` fails if run after any `dbt build` in the same database, because
+`sql/gold/002_sla_check_columns.sql` declares `gold.dim_film(film_key text, film_id text)` while
+`sql/gold/003_agent_redteam_fixture.sql` declares `(film_key bigint, film_id integer)` and both use
+`CREATE TABLE IF NOT EXISTS`, so whichever runs first wins silently and the other's `INSERT` fails on
+type. Compose already works around this by not mounting the redteam fixture at init (VDE-49); the
+scripts do not. *First move:* one throwaway database per proof script, the way the integration suite
+already does it with testcontainers — the shared database is the coupling, not the DDL.
+
+**Cost:**         None yet realised. The integration one is the expensive kind if left: it reports
+success for a suite that never ran, and it does so most reliably on a fresh machine.
+
 ### 2026-08-03 · [`dim_film`] · SCD2 claimed in five places, Type-1 in the one that runs
 
 **Predicted:**   Section 3a gave `dim_film` the grain "one film, at one version of its attributes

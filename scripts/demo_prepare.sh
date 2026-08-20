@@ -14,8 +14,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# DSN defaults verbatim from scripts/prove_synopsis_injection.sh lines 16–17
-DB_URL="${DATABASE_URL:-postgresql://cinema:cinema@localhost:5432/cinema_ops}"
+# DSN defaults match scripts/prove_synopsis_injection.sh: $DB is the migration-owner
+# DSN, DATABASE_URL is the read-only `api` role per .env.example. This needs the owner.
+DB_URL="${DB:-${DATABASE_URL:-postgresql://cinema:cinema@localhost:5432/cinema_ops}}"
 AGENT_URL="${AGENT_DATABASE_URL:-postgresql://agent_reader:agent_reader@localhost:5432/cinema_ops}"
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 export PGPASSWORD="${PGPASSWORD:-cinema}"

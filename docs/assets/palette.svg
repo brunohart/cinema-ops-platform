@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 232" width="1280" height="232" role="img" aria-label="The colour system: bronze, gold and slate carry the three medallion layers; green marks a structural guarantee; red is reserved for quarantine. Each swatch names its hex value and the one thing it is allowed to mean.">
+  <defs>
+    <linearGradient id="pal-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B0D10"/>
+      <stop offset="100%" stop-color="#12161C"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="232" fill="url(#pal-bg)"/>
+  <rect width="1280" height="232" fill="none" stroke="#1D232B" stroke-width="2"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace">
+    <text x="64" y="52" fill="#7C8794" font-size="13" letter-spacing="4.5">ONE COLOUR, ONE MEANING &#183; NEVER DECORATIVE</text>
+  </g>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5">
+    <!-- bronze -->
+    <rect x="64" y="82" width="196" height="44" rx="5" fill="#C08B4F"/>
+    <text x="64" y="152" fill="#C08B4F">#C08B4F</text>
+    <text x="64" y="174" fill="#8B95A1">bronze &#183; as landed</text>
+    <text x="64" y="194" fill="#6F7A87">unparsed, append-only</text>
+
+    <!-- slate -->
+    <rect x="284" y="82" width="196" height="44" rx="5" fill="#8C97A3"/>
+    <text x="284" y="152" fill="#8C97A3">#8C97A3</text>
+    <text x="284" y="174" fill="#8B95A1">silver &#183; conformed</text>
+    <text x="284" y="194" fill="#6F7A87">typed, renamed, deduped</text>
+
+    <!-- gold -->
+    <rect x="504" y="82" width="196" height="44" rx="5" fill="#E0B24C"/>
+    <text x="504" y="152" fill="#E0B24C">#E0B24C</text>
+    <text x="504" y="174" fill="#8B95A1">gold &#183; serving</text>
+    <text x="504" y="194" fill="#6F7A87">the only layer served</text>
+
+    <!-- green -->
+    <rect x="724" y="82" width="196" height="44" rx="5" fill="#4E8C63"/>
+    <text x="724" y="152" fill="#4E8C63">#4E8C63</text>
+    <text x="724" y="174" fill="#8B95A1">structural</text>
+    <text x="724" y="194" fill="#6F7A87">a grant, not a promise</text>
+
+    <!-- quarantine -->
+    <rect x="944" y="82" width="196" height="44" rx="5" fill="#A65B63"/>
+    <text x="944" y="152" fill="#A65B63">#A65B63</text>
+    <text x="944" y="174" fill="#8B95A1">quarantine</text>
+    <text x="944" y="194" fill="#6F7A87">rejected, never dropped</text>
+  </g>
+</svg>

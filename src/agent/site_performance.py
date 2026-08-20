@@ -10,6 +10,7 @@ from typing import Any
 
 import psycopg
 
+from agent.catalog import MIN_GROUP_SIZE
 from agent.limits import MAX_ROWS
 
 # fetch one extra row so we can set truncated without a separate COUNT(*).
@@ -53,8 +54,20 @@ def get_site_performance(
     if truncated:
         rows = rows[:limit]
 
-    serialised = [_serialise_row(r) for r in rows]
-    return {"rows": serialised, "truncated": truncated, "limit": limit}
+    # ARCHITECTURE §6d floor, applied after the LIMIT so `truncated` still answers
+    # "was the row budget the binding constraint" rather than conflating it with
+    # suppression. A showtime that sold fewer than MIN_GROUP_SIZE seats is a small
+    # enough cohort to be a disclosure — one seat at one screening at one site is
+    # one person.
+    kept = [r for r in rows if (r.get("seats_sold") or 0) >= MIN_GROUP_SIZE]
+    serialised = [_serialise_row(r) for r in kept]
+    return {
+        "rows": serialised,
+        "truncated": truncated,
+        "limit": limit,
+        "suppressed_rows": len(rows) - len(kept),
+        "min_group_size": MIN_GROUP_SIZE,
+    }
 
 
 def _serialise_row(row: dict[str, Any]) -> dict[str, Any]:

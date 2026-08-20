@@ -8,7 +8,9 @@ dependence on a pre-provisioned local database.
 from __future__ import annotations
 
 import os
+import re
 import shutil
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -29,7 +31,42 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # PATH the module raises during *collection*, which fails the whole run — including
 # ``pytest -m "not integration"``, where these tests were never going to run. A
 # deselected test must not be able to break a suite it is excluded from.
-collect_ignore = [] if shutil.which("dbt") else ["test_medallion_dag.py"]
+#
+# The cost of ignoring rather than skipping: ``pytest -m integration`` with no dbt
+# installed collected nothing, printed "N deselected", and exited 0 — a green code
+# for a suite that never ran, which is the one result this repository is written
+# against. The module is still ignored (it cannot be imported), but the absence is
+# now announced and, when the caller explicitly asked for the integration suite,
+# fatal. CI installs the [dbt] extra, so this never fires there.
+_HAS_DBT = shutil.which("dbt") is not None
+collect_ignore = [] if _HAS_DBT else ["test_medallion_dag.py"]
+
+
+def _selects_integration(markexpr: str) -> bool:
+    """True only when ``-m`` positively asks for the integration suite.
+
+    Substring-matching ``"integration"`` also matches ``"not integration"``, which
+    is the *unit* invocation — so the naive check turned every unit run into a
+    usage error. Strip the negated form before looking.
+    """
+    return "integration" in re.sub(r"\bnot\s+integration\b", "", markexpr)
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if _HAS_DBT:
+        return
+    warnings.warn(
+        "dbt is not on PATH — tests/integration/test_medallion_dag.py was not "
+        "collected. Install the [dbt] extra to run the integration suite.",
+        stacklevel=1,
+    )
+    if _selects_integration(config.getoption("markexpr") or ""):
+        raise pytest.UsageError(
+            "pytest -m integration was requested but dbt is not on PATH, so the "
+            "integration suite could not be collected. Exiting non-zero rather "
+            "than reporting a green run that tested nothing. "
+            'Install it with: pip install -e ".[dbt]"'
+        )
 
 # Bronze DDL the silver sources need — same set docker-compose applies at init,
 # minus gold fact-grain DDL (dbt builds gold tables).
