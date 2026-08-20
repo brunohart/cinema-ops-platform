@@ -678,7 +678,12 @@ sql/
   meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
-  init/005_agent_role.sql  SELECT-only agent role; no grant on dim_customer PII
+  init/005_agent_role.sql  SELECT-only `agent` role; no grant on dim_customer PII. Exercised
+                           by prove_pii_absent.sh and prove_agent_limits.sh (VDE-42, VDE-44)
+  init/005_agent_reader_role.sql   SELECT-only `agent_reader` — the role the running tool
+                           server connects as (AGENT_DATABASE_URL). Same three-lock shape as
+                           `agent`, arrived at separately under VDE-48; two roles where one
+                           would do, and consolidating them is a migration, not a rename
   init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
