@@ -31,6 +31,7 @@ Producer (VDE-18) emits booking events with:
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import random
@@ -206,6 +207,25 @@ def original_bytes(value: Any) -> bytes:
     return json.dumps(value, sort_keys=True, default=str).encode("utf-8")
 
 
+def quarantine_evidence(raw: bytes, *, reason: str) -> dict[str, Any]:
+    """The original bytes, in a shape ``bronze.quarantine.raw_payload`` can hold.
+
+    A message reaches this path precisely because it is not JSON, so it cannot be
+    stored as parsed JSON — but ADR-011 wants the evidence kept, not a note saying
+    evidence existed. Wrap the bytes verbatim under ``_raw`` so the row round-trips
+    back to exactly what the producer sent, and fall back to base64 for bytes that
+    are not even UTF-8 (a partial write, a binary producer) rather than losing them
+    to a replacement character.
+    """
+    try:
+        return {"_raw": raw.decode("utf-8"), "_parse_error": reason}
+    except UnicodeDecodeError:
+        return {
+            "_raw_b64": base64.b64encode(raw).decode("ascii"),
+            "_parse_error": reason,
+        }
+
+
 def dlq_headers(
     *,
     reason: str,
@@ -300,13 +320,18 @@ class EventExtractor:
                 dead_lettered_n = 0
 
                 if parse_error is not None:
-                    dead_lettered_n, quarantined_n = self._reject(msg, row, reason=parse_error)
+                    dead_lettered_n, quarantined_n = self._reject(
+                        msg, row, reason=parse_error, batch_id=batch_id
+                    )
                 else:
                     assert row is not None
                     ok, error = self.validator.validate(row)
                     if not ok:
                         dead_lettered_n, quarantined_n = self._reject(
-                            msg, row, reason=error or "validation failed"
+                            msg,
+                            row,
+                            reason=error or "validation failed",
+                            batch_id=batch_id,
                         )
                     else:
                         # 2. write, idempotent on _payload_hash
@@ -370,19 +395,31 @@ class EventExtractor:
         row: dict[str, Any] | None,
         *,
         reason: str,
+        batch_id: str,
     ) -> tuple[int, int]:
         """Record a failure durably. Returns ``(dead_lettered, quarantined)``.
 
         DLQ when a producer is configured — the original bytes stay replayable.
         Otherwise ``bronze.quarantine``, which keeps the same evidence in the
         batch substrate (ADR-011).
+
+        ``row`` is None when the payload would not parse. That row was never
+        stamped, so there is nothing to carry the audit columns or the evidence:
+        stamping the evidence itself is what keeps this path writable. Building
+        ``{"_parse_error": reason}`` instead — no payload, no ``_batch_id`` —
+        raised out of ``quarantine_rows`` and killed the consumer on the poison
+        message, which is the opposite of continuing past the poison offset.
         """
         if self.dlq_producer is not None:
             self.dead_letter(msg, original_bytes(_field(msg, "value")), reason=reason)
             return 1, 0
 
-        payload = row if row is not None else {"_parse_error": reason}
-        quarantined = dict(payload)
+        if row is None:
+            evidence = quarantine_evidence(original_bytes(_field(msg, "value")), reason=reason)
+            quarantined = self._stamp(evidence, batch_id=batch_id)
+        else:
+            quarantined = dict(row)
+
         quarantined["_quarantine_reason"] = reason
         self.quarantine_store.write([quarantined])
         return 0, 1
