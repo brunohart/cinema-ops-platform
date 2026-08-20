@@ -43,7 +43,7 @@ Two things change, and only one is the database. Postgres over DuckDB was chosen
 
 ## 6. What I deliberately did not build
 
-- **Managed cloud, Spark, Kubernetes, Snowflake** (ADR-010) — scoped to one machine; the Fly demo supplements the stack (ADR-015).
+- **Managed cloud, Spark, Kubernetes, Snowflake** (ADR-010) — scoped to one machine; the public demo supplements the stack (ADR-015).
 - **Change-data-capture on `cinema_ops`** (ADR-006) — a replication slot on a database I don't own is a risk I won't place on its owner.
 - **A guarantee of exactly-once delivery** (ADR-008) — idempotent merge makes repetition harmless, cheaper than a coordination layer with its own failure modes.
 - **A columnar warehouse** (ADR-002) — Postgres was chosen for its role model, not analytical speed; the trade is stated, not hidden.
@@ -51,7 +51,7 @@ Two things change, and only one is the database. Postgres over DuckDB was chosen
 - **A continuous, model-graded eval suite beyond the VDE-48 fixture** — one red-team scenario is proven; a broader suite isn't built.
 - **Real operator data** — this holds synthetic fixtures, not a product in waiting.
 
-Unfixed rather than undecided: `FileExtractor` still rejects a file whole, behind ADR-011. The bronze-immutability guard is red on `main` — a test-only helper containing `TRUNCATE` landed inside `src/` when two earlier issues merged, catching exactly what it exists to catch; the incident stays visible, not tidied away.
+Unfixed rather than undecided: `FileExtractor` still rejects a file whole, behind ADR-011. The bronze-immutability guard was red on `main` — a test-only `TRUNCATE` helper landed inside `src/` when two earlier issues merged, catching exactly what it exists to catch; the guard has been green since, and the incident stays visible, not tidied away.
 
 ---
 

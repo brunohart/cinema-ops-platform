@@ -39,6 +39,14 @@ Named here because a limit a reviewer finds is worth less than one it is told:
   precisely because it lives somewhere the ledger cannot reach.
 - **A well-formed, single-line lesson can still be persuasive.** Flattening removes forged structure,
   not rhetoric. The control there is review: entries arrive in pull requests like code.
+- **The rule has been broken once, in the open.** Commit `4d4a521` (2026-08-03) renamed an MCP config
+  key and rewrote the three ledger lines that quoted the old name, rehashing each one. Validation
+  passes, because the tool that rehashes is the tool that validates — which is exactly the limit
+  above, reached from the other side: a chain proves nobody *else* edited the file, never that the
+  author did not. The entries stand as rewritten rather than being reverted, the commit says plainly
+  what it did, and `git log -p docs/agent-ledger/ledger.jsonl` is the anchor. A rename that made
+  three historical records more accurate was not worth the rule; that is the lesson, recorded as a
+  note entry (`6bcf9f739103`) rather than as a repair.
 
 ## One entry
 
