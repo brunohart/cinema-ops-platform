@@ -396,9 +396,9 @@ def digest(
     lines.append("")
     lines.append(f"Most recent lessons (newest first, {shown} of {len(records)}):")
     for record in list(reversed(records))[:limit]:
-        tags = f" [{', '.join(record['tags'])}]" if record["tags"] else ""
+        tag_suffix = f" [{', '.join(record['tags'])}]" if record["tags"] else ""
         issue = f" {record['issue']}" if record["issue"] else ""
-        lines.append(f"  {record['date']} {record['phase']}{issue}{tags}: {record['lesson']}")
+        lines.append(f"  {record['date']} {record['phase']}{issue}{tag_suffix}: {record['lesson']}")
         if record["evidence"]:
             lines.append(f"      evidence: {record['evidence']}")
 
