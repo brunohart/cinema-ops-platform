@@ -45,8 +45,7 @@ Named here because a limit a reviewer finds is worth less than one it is told:
   above, reached from the other side: a chain proves nobody *else* edited the file, never that the
   author did not. The entries stand as rewritten rather than being reverted, the commit says plainly
   what it did, and `git log -p docs/agent-ledger/ledger.jsonl` is the anchor. A rename that made
-  three historical records more accurate was not worth the rule; that is the lesson, recorded as a
-  note entry (`6bcf9f739103`) rather than as a repair.
+  three historical records more accurate was not worth the rule; that is the lesson.
 
 ## One entry
 
