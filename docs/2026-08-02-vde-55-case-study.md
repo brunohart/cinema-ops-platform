@@ -23,7 +23,7 @@ Landing files are validated against a Pydantic model at the ingest boundary; a f
 
 `cinema_ops` gets an overlap window rather than CDC, since CDC would need a replication slot on a database I read and don't own (ADR-006). Every incremental read subtracts a `SAFETY_LAG` of five minutes from the watermark, re-reading a short window so a late-committing row isn't permanently skipped — a stated guess, made safe by ADR-008: the bronze write beneath it is an idempotent merge, so re-reading costs nothing.
 
-That merge answers ticketing's duplicates too: every write path merges on a natural or event key, so processing an event *n* times produces the same state as once (ADR-008); no duplicate `ticket_id` is invariant C3, not a hope.
+That merge answers ticketing's duplicates too: bronze merges on payload hash, silver on event id, so processing an event *n* times produces the same state as once (ADR-008); no duplicate `ticket_id` is invariant C3, not a hope.
 
 A poison payload gets a different substrate than the same failure in a file: on parse failure the consumer writes the original bytes to a dead-letter topic with headers naming reason, topic, partition, offset, then commits past it (ADR-012) — headers, not a wrapper, so the payload stays replayable once fixed.
 
