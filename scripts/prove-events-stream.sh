@@ -9,6 +9,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
 
 export DB="${DB:-postgresql://cinema:cinema@localhost:5432/cinema_ops}"
 export KAFKA_BOOTSTRAP="${KAFKA_BOOTSTRAP:-localhost:19092}"

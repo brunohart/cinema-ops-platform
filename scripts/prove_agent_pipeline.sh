@@ -15,11 +15,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PYTHON="${PYTHON:-python3}"
-if ! command -v "$PYTHON" >/dev/null 2>&1; then
-  echo "prove_agent_pipeline: python3 not found" >&2
-  exit 2
-fi
+. "$ROOT/scripts/lib/preflight.sh"
+# Not "is python3 present" but "is it new enough": macOS answers python3 with 3.9,
+# and agent_ledger.py imports datetime.UTC (3.11+).
+PYTHON="$(preflight_python)" || exit 2
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT

@@ -12,6 +12,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
 
 # $DB is the migration-owner DSN everywhere else in scripts/ (prove_agent_limits.sh,
 # prove_least_privilege_roles.sh, prove_fact_grain.sh …), while .env.example documents
@@ -21,6 +23,18 @@ cd "$ROOT"
 # only as a legacy fallback.
 DB_URL="${DB:-${DATABASE_URL:-postgresql://cinema:cinema@localhost:5432/cinema_ops}}"
 AGENT_URL="${AGENT_DATABASE_URL:-postgresql://agent_reader:agent_reader@localhost:5432/cinema_ops}"
+
+# 003_agent_redteam_fixture.sql owns gold.dim_film with a bigint film_key and
+# seeds film_key = 1. dbt's gold.dim_film has a text film_key and no unique index
+# at all, so against a seeded stack the fixture failed on "there is no unique or
+# exclusion constraint matching the ON CONFLICT specification". demo_prepare.sh
+# already runs these beats against cinema_redteam for exactly this reason; do the
+# same here rather than let whatever $DB points at decide. REDTEAM_DB overrides.
+REDTEAM_DB="${REDTEAM_DB:-cinema_redteam}"
+DB_URL="$(preflight_scratch_db "$DB_URL" "$REDTEAM_DB")"
+AGENT_URL="${AGENT_URL%/*}/${REDTEAM_DB}"
+echo "==> fixture database: ${REDTEAM_DB}"
+
 export DB="$DB_URL"
 export AGENT_DATABASE_URL="$AGENT_URL"
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -34,7 +48,13 @@ echo "==> VDE-48 prove: synopsis injection red-team"
 
 echo "==> apply schemas / fixture / agent_reader grants"
 "${PSQL[@]}" -f sql/init/001_schemas.sql
-"${PSQL[@]}" -f sql/meta/002_agent_access_log.sql
+# meta/002_agent_access_log.sql and meta/003_agent_access_log.sql both declare
+# meta.agent_access_log with CREATE TABLE IF NOT EXISTS, and the shapes differ:
+# only 003 has token_label and row_count, which is what the tool layer inserts.
+# Whichever runs first wins and the other is a silent no-op, so apply 003 — on a
+# shared database this was masked by the compose seed having applied it already.
+"${PSQL[@]}" -f sql/meta/003_agent_access_log.sql
+"${PSQL[@]}" -f sql/meta/003_agent_tokens.sql
 "${PSQL[@]}" -f sql/gold/002_dim_customer.sql
 "${PSQL[@]}" -f sql/gold/003_agent_redteam_fixture.sql
 # Role password matches AGENT_DATABASE_URL default used by the tool layer.

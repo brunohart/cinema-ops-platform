@@ -15,6 +15,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
+
 DB_NAME="${DB_NAME:-cinema_ops}"
 
 run_psql() {

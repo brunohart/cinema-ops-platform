@@ -7,6 +7,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="${HOME}/.local/bin:${PATH}"
 export DBT_PROFILES_DIR="${ROOT}/dbt"
 
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
+
 DB_URL="${DB:-postgresql://cinema:cinema@localhost:5432/cinema_ops}"
 
 psql_cmd() {

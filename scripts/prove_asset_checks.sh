@@ -10,6 +10,20 @@ export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 export PATH="${HOME}/.local/bin:${PATH}"
 export DB="${DB:-postgresql://cinema:cinema@localhost:5432/cinema_ops}"
 
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
+
+# 002_sla_check_columns.sql declares its own gold stubs with CREATE TABLE IF NOT
+# EXISTS. Against a dbt-built gold those are no-ops and the seed then meets the
+# real columns: dim_film.film_id is integer there, text in the stub, so the proof
+# died on `invalid input syntax for type integer: "FILM-DEMO"` — and it died only
+# after `docker compose up`, i.e. exactly for a reviewer following the quickstart.
+# Give the fixture a database of its own instead of teaching it two schemas.
+# ASSET_CHECKS_DB=cinema_ops opts back in to the shared database.
+DB="$(preflight_scratch_db "$DB" "${ASSET_CHECKS_DB:-cinema_asset_checks}")"
+export DB
+echo "==> fixture database: ${DB##*/}"
+
 echo "==> apply gold grain + SLA columns"
 python3 - <<'PY'
 import os

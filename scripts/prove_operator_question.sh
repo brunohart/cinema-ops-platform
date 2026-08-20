@@ -215,6 +215,8 @@ except Exception as e:
 PY
 
   cd "$ROOT"
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
   MINT_TOKEN=""
   if python3 -c "import src.cli" >/dev/null 2>&1; then
     MINT_TOKEN="$(python3 -m src.cli agent mint-token \

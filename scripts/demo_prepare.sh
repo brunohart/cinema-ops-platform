@@ -37,7 +37,13 @@ echo "==> demo_prepare: create cinema_redteam if absent"
 echo "==> apply schemas / fixture / agent_reader grants (same SQL set as prove_synopsis_injection.sh)"
 # Applied without ON_ERROR_STOP=1 so IF NOT EXISTS clauses do not abort on re-runs.
 "${PSQL_RT[@]}" -f sql/init/001_schemas.sql
-"${PSQL_RT[@]}" -f sql/meta/002_agent_access_log.sql
+# Same set as prove_synopsis_injection.sh, and prove_loom_demo.sh check 8 keeps it
+# that way. meta/002_agent_access_log.sql and meta/003_agent_access_log.sql both
+# declare meta.agent_access_log with CREATE TABLE IF NOT EXISTS and disagree on
+# its columns — only 003 has token_label and row_count, which the tool layer
+# inserts — so a fresh cinema_redteam built from 002 is missing them.
+"${PSQL_RT[@]}" -f sql/meta/003_agent_access_log.sql
+"${PSQL_RT[@]}" -f sql/meta/003_agent_tokens.sql
 "${PSQL_RT[@]}" -f sql/gold/002_dim_customer.sql
 "${PSQL_RT[@]}" -f sql/gold/003_agent_redteam_fixture.sql
 "${PSQL_RT[@]}" -c "DO \$\$ BEGIN
