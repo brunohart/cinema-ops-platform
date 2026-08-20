@@ -3,7 +3,7 @@
 **Status:** living document. Written before the pipeline, revised by it.
 **Started:** 2026-07-29
 **Last revised:** 2026-08-20
-**Revision count:** 13
+**Revision count:** 14
 
 ---
 
@@ -489,6 +489,36 @@ Format:
 ---
 
 <!-- APPEND NEW CORRECTIONS DIRECTLY BELOW THIS LINE, NEWEST AT TOP -->
+
+### 2026-08-20 · [dbt film path] · the model reads one table, the extractor writes another
+
+**Predicted:**   Section 3 describes one medallion path per source: the extractor lands raw rows in
+bronze, a silver staging model conforms them, gold serves them. The lineage graph in the README shows
+ten asset keys, all materialised, the film path among them.
+
+**Observed:**    `dbt/models/silver/stg_films.sql` reads `source('bronze', 'film_raw')`. The live
+Dagster asset builds `LandingBronzeStore(dsn, table="bronze.raw_tmdb")` — a different physical table,
+with its own DDL in `sql/bronze/005_raw_tmdb.sql`. Nothing in the extractor path ever writes
+`bronze.film_raw`; the only inserts come from `sql/seed/001_demo_bronze.sql`, `scripts/prove-gold.sh`
+and the integration fixture. Run the real pipeline against an unseeded database and `stg_films` — and
+`dim_film` behind it — is empty, while every check stays green, because every check seeds first.
+
+**Why the gap:**  `src/orchestration/dbt_assets.py` maps `("bronze", "film_raw")` to
+`AssetKey(["bronze", "raw_tmdb"])` so Dagster's graph joins the two halves, and a comment there notes
+the names differ. That mapping is what the *lineage view* reads; the compiled dbt SQL still selects
+from `bronze.film_raw`. So the picture agreed with itself while the data did not, and the seed made
+the difference invisible — the gap was papered over at exactly the layer built to expose it.
+
+**Changed:**     Nothing in the pipeline yet. Named in the README's omissions list with the first
+move, and recorded here. Which table name survives is a decision — `raw_tmdb` matches the extractor
+and the asset key, `film_raw` matches the dbt source and the seeds — and it carries a migration plus
+a re-proof of the gold grain checks, so it is not a rename to be done in passing.
+
+**Cost:**        None realised: no consumer runs unseeded. The cost is to the claim, not the data —
+a lineage graph is evidence that the path is wired, and this one was evidence of a mapping instead.
+Caught by reading the dbt source against the extractor, not by any check, because every check seeds.
+
+---
 
 ### 2026-08-20 · [header] · the staleness rule went unhonoured a second time — by the commit that edits this file
 
