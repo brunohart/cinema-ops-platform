@@ -16,12 +16,24 @@ concurrent branches can still union-merge without breaking the chain.
 
 from __future__ import annotations
 
+import sys
+
+# macOS still ships 3.9 as `python3`, and `datetime.UTC` lands in 3.11 — so the README's
+# "nothing but python3" path fails here first, on a reviewer's machine, for anyone who does not
+# read the version note beside it. An unhandled ImportError names the symbol, not the cause.
+if sys.version_info < (3, 11):  # noqa: UP036 — ruff reads the floor from pyproject; the point of
+    # this block is the interpreter that never read pyproject, so it cannot be "outdated" here.
+    sys.exit(
+        f"agent_ledger: needs Python 3.11 or newer, found {sys.version.split()[0]}.\n"
+        "  macOS ships 3.9 as `python3`; try `python3.12 scripts/agent_ledger.py ...`,\n"
+        "  or `uv run scripts/agent_ledger.py ...` to use the pinned toolchain."
+    )
+
 import argparse
 import hashlib
 import json
 import os
 import re
-import sys
 import uuid
 from collections import Counter
 from datetime import UTC, datetime

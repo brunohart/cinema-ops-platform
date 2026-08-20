@@ -1,6 +1,6 @@
 # cinema-ops-platform
 
-A local, fully-proven data platform for cinema exhibition data — four unlike sources, an append-only bronze layer, a governed gold layer, and an AI agent tool set with no personal-data field.
+A local data platform for cinema exhibition data — four unlike sources, an append-only bronze layer, a governed gold layer, an AI agent tool set with no personal-data field, and every claim shipped with the command that proves it.
 
 ---
 
@@ -23,7 +23,7 @@ Each row says: *this source will fail in this way, and here is the thing I built
 | 1 | TMDB API | `429` rate limit | request budget is the API owner's, not mine; bursty backfills exceed it | HTTP status check on every response; counter on retry exhaustion | exponential backoff with jitter; alert and halt on give-up rather than proceeding with partial data | `PREDICTED` |
 | 2 | landing files | schema drift | upstream renames, reorders or reformats a column and has no obligation to tell me | Pydantic model validated at ingest; rejected rows counted and written to `bronze.quarantine` with `raw_payload` retained | quarantine the bad row, land the good ones; one malformed row must not block the batch (ADR-011) | `PREDICTED` |
 | 3 | `cinema_ops` | late-arriving transactions | a row's business timestamp precedes its commit time; a high-watermark read steps past it permanently | row count in the overlap band per run; reconciliation against source count for a closed period | overlap window on every incremental read + idempotent dedupe on natural key | `PREDICTED` |
-| 4 | ticketing events | duplicate delivery | at-least-once delivery semantics; redelivery on consumer restart or partition replay | duplicate rate on event key, logged per run | idempotent merge on event id — processing the same event *n* times yields the same state as once | `PREDICTED` |
+| 4 | ticketing events | duplicate delivery | at-least-once delivery semantics; redelivery on consumer restart or partition replay | duplicate rate on event key, logged per run | idempotent merge — bronze conflicts on `_payload_hash` (`ON CONFLICT DO NOTHING`), silver keeps one row per event id — so processing the same event *n* times yields the same state as once | `PREDICTED` |
 | 4b | ticketing events | unparseable / invalid payload | producer bug, partial write, or schema drift on a JSON event | DLQ publish count; consumer continues past the poison offset | produce ORIGINAL bytes to `ticketing.bookings.dlq` with reason/source headers, then commit (ADR-012) — same principle as `bronze.quarantine`, different substrate | `PREDICTED` |
 
 Source of truth: [`ARCHITECTURE.md` §2](ARCHITECTURE.md#2-failure-modes). 2am cut: `RUNBOOK.md`.
@@ -39,7 +39,7 @@ git clone https://github.com/brunohart/cinema-ops-platform && cd cinema-ops-plat
 ./scripts/quickstart.sh          # Postgres 16 with all DDL applied, then the Dagster UI
 ```
 
-Open **http://127.0.0.1:3000** — the asset graph in section 2, live (needs Docker and Python 3.11+).
+Open **http://127.0.0.1:3000** — the asset graph pictured above, live (needs Docker and Python 3.11+).
 
 Nothing but `python3` (3.11+) and `git`: `./scripts/prove_agent_pipeline.sh` and `./scripts/prove_readme_structure.sh`. The version matters — `scripts/agent_ledger.py` imports `datetime.UTC`, which lands in 3.11, and macOS still ships 3.9 as `python3`. The full proof table is below the fold.
 
@@ -90,7 +90,7 @@ A national circuit runs hundreds of sites and years of transactions; this build 
 - **`ops.watermarks` becomes the contention point.** Its key today is `source` — one row, written at the end of every run. At 400 sites it has to become `(site_id, source)`, partitioned by site, or the fleet serialises behind one lock.
 - **One Slack webhook becomes routing.** Every failure posts to one channel; at 400 sites that channel is muted by week two. It needs severity, an owner per site group, and a digest for warnings.
 
-*Seven things I deliberately did not build, each with the first move if I had a week:*
+*What I deliberately did not build, each with the first move if I had a week:*
 [**Deliberately not built**](#deliberately-not-built) — below the fold.
 
 ---
@@ -107,7 +107,8 @@ script can check rather than something you have to take my word for.
 - **Tests read the implementation before they were written.** Paired by basename against the code
   they test, no test's own first commit precedes the implementation's.
 - **Plan, implement, verify — every issue.** Opus plans (read-only), Sonnet implements, Opus
-  verifies (read-only); each phase appends its lesson to
+  verifies (read-only) — and where an environment could not honour the model pin, the deviation
+  is in the ledger, not papered over; each phase appends its lesson to
   [`docs/agent-ledger/`](docs/agent-ledger/) before handing over, so the next run starts past traps
   the last one already hit.
 - **Gates the model could not talk past.** `ruff`, `mypy`, `pytest` and `dbt` test failures fail CI,
@@ -350,7 +351,7 @@ pytest -q                       # the whole suite
 | case study — six section anchors, word band, operator-language test, staleness guard against what has actually shipped | `./scripts/prove_case_study.sh` | [recorded](docs/2026-08-02-vde-55-case-study.md) — `PASS=10` |
 | section 6 names its scale limits with numbers and gives every omission a one-sentence first move | `./scripts/prove_readme_structure.sh` | [recorded](docs/2026-08-02-vde-56-scale-limits.md) — `PASS=10` |
 | spec preceded code — commit one carries no code (nothing under `src/`, `dbt/`, `sql/`, `tests/`, `scripts/`); tests do not predate their implementations; plan precedes implement in every recorded session | `./scripts/prove_ai_practice.sh` | [recorded](docs/2026-08-02-vde-58-ai-first-practice.md) — PASS=6 |
-| 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [recorded](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10` |
+| 3-minute Loom shot list — 7 beats, entry points exist, beat 7 query omits token_label, LOOM_URL gate | `./scripts/prove_loom_demo.sh` | [shot list](docs/2026-08-02-vde-57-loom-demo-script.md) — `PASS=10`; the video itself is not yet recorded |
 | three Model-02 rejections are specific, not general — each names a before/after ordering and a window, cites files/tests/ADRs that exist, and every citation literal still greps | `./scripts/prove_rejection_notes.sh` | [recorded](docs/2026-08-02-vde-59-rejected-ai-output.md) — `PASS=9` |
 | MCP access log — operator question answered through tool calls; every call (ok, error, refused) writes a row to `meta.agent_access_log`; fail-closed on log failure; `list_sessions` refused when not in token's allowed-tools | `./scripts/prove_operator_question.sh` | [recorded](docs/2026-08-02-vde-46-claude-operational-question.md) — 7 sections, Queen Street −38% |
 
@@ -489,10 +490,11 @@ length, not for cover.
 - **Multi-tenancy** — `meta.agent_tokens.site_ids` anticipates it; nothing implements it. *First week:* `tenant_id` on the token and on every gold row, enforced by Postgres row-level security, so isolation is a grant and not a `WHERE` clause.
 - **A red team on every change** — `mcp-eval.yml` runs the boundary evals only when `mcp/**` or `evals/**` changes, and the VDE-48 injection proof runs in no workflow at all. *First week:* drop the path filter, run it against the CI Postgres service.
 - **SCD2 on `dim_film`** — the live model is Type-1 and emits `valid_from`/`valid_to`/`is_current` as constants, so a point-in-time join returns today's attributes for every date; the working snapshot sits unwired in `transform/` ([ARCHITECTURE §7](ARCHITECTURE.md#7-field-corrections)). *First week:* move the snapshot into `dbt/`, build `dim_film` from it, and add an asset check that fails when every row is `is_current`.
+- **The TMDB write path wired to the film models end to end** — the live extractor lands rows in `bronze.raw_tmdb`, but `stg_films` reads `source('bronze','film_raw')`, a table only the seed scripts populate; `dbt_assets.py` remaps the asset key so the lineage graph joins up, but the data does not. Run the real pipeline with no seed and `dim_film` stays empty. *First week:* repoint the dbt source at `raw_tmdb`, retire `film_raw`, and reseed CI through the extractor's own table so the proof exercises the real write path.
 - **A live Claude Desktop session against the warehouse** — the MCP server, access-log writes and `claude_desktop_config.example.json` exist and are proven (VDE-46, `prove_operator_question.sh`); a real session needs a minted token and a live Postgres DSN, which is configuration rather than build. *First week:* mint a scoped token against the compose stack and record one real session end to end.
 - **No real operator data** — synthetic rows throughout; none of this has met a circuit. *First week:* one conversation with a site or circuit operator ([thesis map](docs/thesis-map.md) tracks it as the weakest claim here).
 - **A failure mode exercised for real** — TMDB is mocked, the other three sources are synthetic, so every row above is still `PREDICTED`. A detection that has only ever fired against a fixture is tested, not proven. *First week:* replay a real TMDB backfill off-CI until a live `429` lands ([§8 Q6](ARCHITECTURE.md#8-open-questions)).
-- **A deployed public demo** — ~~missing~~ **done 2026-08-19**, and worth leaving here rather than deleting, because the entry was wrong in a more interesting way than it was right. `fly.toml` was committed and `deploy_fly.sh` never run, so `cinema-ops-platform-demo.fly.dev` was NXDOMAIN for the eighteen days this README pointed at it — a URL published on the strength of a config file, which is the failure this very section exists to surface and did not, because it recorded the deploy as missing while the rest of the page printed the address as though it were not. Now at [`cinema-ops-platform-demo.vercel.app`](https://cinema-ops-platform-demo.vercel.app/healthz) (VDE-62). *Still open:* the deploy is manual — `scripts/deploy_vercel.sh` runs from a laptop, so the live surface can drift from `main` between runs, and nothing yet fails when it does.
+- **A deployed public demo** — ~~missing~~ **done 2026-08-19**, and worth leaving here rather than deleting, because the entry was wrong in a more interesting way than it was right. `fly.toml` was committed and `deploy_fly.sh` never run, so `cinema-ops-platform-demo.fly.dev` was NXDOMAIN for the eighteen days this README pointed at it — a URL published on the strength of a config file, which is the failure this very section exists to surface and did not, because it recorded the deploy as missing while the rest of the page printed the address as though it were not. Now at [`cinema-ops-platform-demo.vercel.app`](https://cinema-ops-platform-demo.vercel.app/healthz) (VDE-62). *First week:* put `deploy_vercel.sh` behind a workflow on `main` so the live surface cannot silently drift from the branch, which it can today because the deploy runs from a laptop and nothing fails when the two disagree.
 
 </details>
 
@@ -509,7 +511,7 @@ An artefact built to be operated and defended completely, not a demonstration of
   model ([ADR-002](DECISIONS.md#adr-002--postgres-over-duckdb)). At genuine scale this choice does not
   hold, and the honest answer is a columnar engine — which the medallion layering ports to largely
   intact.
-- The public Fly demo illustrates the policy in the browser; [ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
+- The [public demo](https://cinema-ops-platform-demo.vercel.app) illustrates the policy in the browser; [ADR-015](DECISIONS.md#adr-015--public-demo-surface-supplements-not-replaces-the-local-tool-interface)
   records why this does not contradict ADR-010 — the demo is a fixture illustration, not the managed-cloud primary runtime ADR-010 ruled out.
 
 **What this does not claim:**
@@ -650,7 +652,7 @@ there was no issue to trace it to. The trail records the gap.
 
 ```
 ARCHITECTURE.md            what the system is — living, revised, never tidied
-DECISIONS.md               ADR-001…016, each ending in "what would change my mind"
+DECISIONS.md               ADR-001…017, each ending in "what would change my mind"
 CLAUDE.md                  the working rules, and the rules for changing them
 RUNBOOK.md                 three likely failures — symptom first, then what on-call does
 Dockerfile                 multi-stage image: installs Python deps + dbt + dagster
@@ -676,7 +678,12 @@ sql/
   meta/002_pipeline_runs.sql   append-only run history (no UPDATE)
   init/002_extractor_role.sql   INSERT-only grants — the rule, enforced
   init/004_kill_test_…     the kill test that proves the grant holds
-  init/005_agent_role.sql  SELECT-only agent role; no grant on dim_customer PII
+  init/005_agent_role.sql  SELECT-only `agent` role; no grant on dim_customer PII. Exercised
+                           by prove_pii_absent.sh and prove_agent_limits.sh (VDE-42, VDE-44)
+  init/005_agent_reader_role.sql   SELECT-only `agent_reader` — the role the running tool
+                           server connects as (AGENT_DATABASE_URL). Same three-lock shape as
+                           `agent`, arrived at separately under VDE-48; two roles where one
+                           would do, and consolidating them is a migration, not a rename
   init/005_api_role.sql    SELECT-only api role over gold allow-list (Hono)
   bronze/001_quarantine.sql     raw_payload is the point
   gold/001_fact_grains.sql      grain keys enforced before the dbt model
@@ -731,8 +738,9 @@ demo/
   inject.py                beat 6: run_agent_turn with injection prompt, assert pii_absent (VDE-57)
 
 docs/                      dated artefacts: kill-test recording, essay, thesis map
-tests/                     168 collected — 163 pass, 4 skip without a throwaway Postgres,
-                           1 integration deselected; all HTTP mocked, no live API calls
+tests/                     168 collected with the [dbt] extra — 163 pass, 4 skip without a
+                           throwaway Postgres, 1 integration deselected. Without dbt on PATH:
+                           166 collected, 161 pass, 5 skip. All HTTP mocked, no live API calls
 ```
 
 </details>
@@ -859,11 +867,11 @@ function as everywhere else here. A document that can only get longer is a docum
 
 ## Legal notice
 
-Theatrical is an independent, community-driven open-source research and engineering project. It is
-**not** affiliated with, endorsed by, sponsored by, or officially connected to any cinema software
-vendor.
+cinema-ops-platform is an independent, personal open-source project. It is **not** affiliated
+with, endorsed by, sponsored by, or officially connected to any cinema software vendor.
 
 All product and company names referenced are trademarks or registered trademarks of their respective
-owners. Theatrical uses publicly documented APIs in accordance with their published documentation.
+owners. The only external API used is TMDB, under its published documentation; every other row in
+this repository is synthetic.
 
 © 2026 Bruno Hart
