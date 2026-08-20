@@ -23,6 +23,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="${HOME}/.local/bin:${PATH}"
 cd "$ROOT"
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
 
 DB_URL="${DB:-postgresql://cinema:cinema@127.0.0.1:5432/cinema_ops}"
 

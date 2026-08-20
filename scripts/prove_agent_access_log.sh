@@ -10,6 +10,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
 
 if [[ -z "${DB:-}" && -z "${DATABASE_URL:-}" ]]; then
   echo "DB (or DATABASE_URL) must be set" >&2

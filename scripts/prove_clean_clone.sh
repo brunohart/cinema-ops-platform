@@ -14,6 +14,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+. "$ROOT/scripts/lib/preflight.sh"
+preflight_psql || exit 2   # psql is often installed but keg-only, so not on PATH
+
 TMPDIR_PARENT="${TMPDIR:-/tmp}"
 STRANGERTEST="${TMPDIR_PARENT}/strangertest-vde49-$$"
 PROJECT="vde49clean"
